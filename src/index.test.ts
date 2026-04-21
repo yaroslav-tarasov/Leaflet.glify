@@ -2,6 +2,9 @@ import { Glify } from "./index";
 import { IPointsSettings, Points } from "./points";
 import { ILinesSettings, Lines } from "./lines";
 import { IShapesSettings, Shapes } from "./shapes";
+import { Quads } from "./quads";
+import { Texts } from "./texts";
+import { Text2D } from "./texts2d";
 import { LatLng, LeafletMouseEvent, Map, Point } from "leaflet";
 import { FeatureCollection, LineString, MultiPolygon } from "geojson";
 
@@ -377,14 +380,23 @@ describe("glify", () => {
       let pointsTryHoverSpy: jest.SpyInstance;
       let linesTryHoverSpy: jest.SpyInstance;
       let shapesTryHoverSpy: jest.SpyInstance;
+      let quadsTryHoverSpy: jest.SpyInstance;
+      let textsTryHoverSpy: jest.SpyInstance;
+      let text2dTryHoverSpy: jest.SpyInstance;
       beforeEach(() => {
         glify = new Glify();
         glify.Points = PointsSpy;
         glify.Lines = LinesSpy;
         glify.Shapes = ShapesSpy;
+        glify.Quads = QuadsSpy;
+        glify.Texts = TextsSpy;
+        glify.Text2D = Text2DSpy;
         pointsTryHoverSpy = jest.spyOn(glify.Points, "tryHover");
         linesTryHoverSpy = jest.spyOn(glify.Lines, "tryHover");
         shapesTryHoverSpy = jest.spyOn(glify.Shapes, "tryHover");
+        quadsTryHoverSpy = jest.spyOn(glify.Quads, "tryHover");
+        textsTryHoverSpy = jest.spyOn(glify.Texts, "tryHover");
+        text2dTryHoverSpy = jest.spyOn(glify.Text2D, "tryHover");
         element = document.createElement("div");
         map = new Map(element);
         glify.setupHover(map);
@@ -397,8 +409,11 @@ describe("glify", () => {
         pointsTryHoverSpy.mockRestore();
         linesTryHoverSpy.mockRestore();
         shapesTryHoverSpy.mockRestore();
+        quadsTryHoverSpy.mockRestore();
+        textsTryHoverSpy.mockRestore();
+        text2dTryHoverSpy.mockRestore();
       });
-      it("calls tryHover on Points, Lines, and Shapes", () => {
+      it("calls tryHover on all supported layer types", () => {
         map.fireEvent("mousemove", {
           latlng,
           layerPoint,
@@ -427,7 +442,74 @@ describe("glify", () => {
           map,
           glify.shapesInstances
         );
+        expect(quadsTryHoverSpy).toHaveBeenCalledWith(
+          expected,
+          map,
+          glify.quadsInstances
+        );
+        expect(textsTryHoverSpy).toHaveBeenCalledWith(
+          expected,
+          map,
+          glify.textsInstances
+        );
+        expect(text2dTryHoverSpy).toHaveBeenCalledWith(
+          expected,
+          map,
+          glify.text2dInstances
+        );
       });
+    });
+  });
+  describe("destroyByMap", () => {
+    it("calls destroy for map-matching instances and removes them", () => {
+      const glify = new Glify();
+      const mapA = new Map(document.createElement("div"));
+      const mapB = new Map(document.createElement("div"));
+      const destroyA = jest.fn();
+      const destroyB = jest.fn();
+      const instanceA = { map: mapA, destroy: destroyA } as any;
+      const instanceB = { map: mapB, destroy: destroyB } as any;
+      glify.pointsInstances = [instanceA];
+      glify.linesInstances = [instanceB];
+      glify.clickSetupMaps = [mapA, mapB];
+      glify.hoverSetupMaps = [mapA, mapB];
+
+      glify.destroyByMap(mapA);
+
+      expect(destroyA).toHaveBeenCalled();
+      expect(destroyB).not.toHaveBeenCalled();
+      expect(glify.pointsInstances).toEqual([]);
+      expect(glify.linesInstances).toEqual([instanceB]);
+      expect(glify.clickSetupMaps).toEqual([mapB]);
+      expect(glify.hoverSetupMaps).toEqual([mapB]);
+    });
+  });
+  describe("destroyAll", () => {
+    it("calls destroy on all instances and clears all registries", () => {
+      const glify = new Glify();
+      const map = new Map(document.createElement("div"));
+      const destroy = jest.fn();
+      const instance = { map, destroy } as any;
+      glify.pointsInstances = [instance];
+      glify.linesInstances = [instance];
+      glify.shapesInstances = [instance];
+      glify.quadsInstances = [instance];
+      glify.textsInstances = [instance];
+      glify.text2dInstances = [instance];
+      glify.clickSetupMaps = [map];
+      glify.hoverSetupMaps = [map];
+
+      glify.destroyAll();
+
+      expect(destroy).toHaveBeenCalledTimes(6);
+      expect(glify.pointsInstances).toEqual([]);
+      expect(glify.linesInstances).toEqual([]);
+      expect(glify.shapesInstances).toEqual([]);
+      expect(glify.quadsInstances).toEqual([]);
+      expect(glify.textsInstances).toEqual([]);
+      expect(glify.text2dInstances).toEqual([]);
+      expect(glify.clickSetupMaps).toEqual([]);
+      expect(glify.hoverSetupMaps).toEqual([]);
     });
   });
 });
@@ -482,6 +564,33 @@ class ShapesSpy extends Shapes {
     e: LeafletMouseEvent,
     map: Map,
     instances: Shapes[]
+  ): boolean[] {
+    return [];
+  }
+}
+class QuadsSpy extends Quads {
+  static tryHover(
+    e: LeafletMouseEvent,
+    map: Map,
+    instances: Quads[]
+  ): boolean[] {
+    return [];
+  }
+}
+class TextsSpy extends Texts {
+  static tryHover(
+    e: LeafletMouseEvent,
+    map: Map,
+    instances: Texts[]
+  ): boolean[] {
+    return [];
+  }
+}
+class Text2DSpy extends Text2D {
+  static tryHover(
+    e: LeafletMouseEvent,
+    map: Map,
+    instances: Text2D[]
   ): boolean[] {
     return [];
   }
