@@ -302,7 +302,13 @@ export class CanvasOverlay extends Layer {
   }
 
   onRemove(map: Map): this {
-    if (this.canvas) {
+    const tag = this.tag;
+    const linkedCount = tag
+      ? CanvasOverlay.linkedLayers[tag]?.length ?? 0
+      : 0;
+    const shouldDetachCanvas = !tag || linkedCount <= 1;
+
+    if (this.canvas && shouldDetachCanvas) {
       const pane = map.getPane(this._pane);
       if (!pane) {
         throw new Error("unable to find pane");
@@ -324,7 +330,17 @@ export class CanvasOverlay extends Layer {
         );
       }
 
-    } 
+      const linkedLayers = CanvasOverlay.linkedLayers[this.tag];
+      if (linkedLayers) {
+        CanvasOverlay.linkedLayers[this.tag] = linkedLayers.filter(
+          (layer) => layer !== this
+        );
+        if (CanvasOverlay.linkedLayers[this.tag].length === 0) {
+          delete CanvasOverlay.linkedLayers[this.tag];
+          delete CanvasOverlay.linkedLayersController[this.tag];
+        }
+      }
+    }
 
     // map.off("moveend", this._reset, this);
     // map.off("resize", this._resize, this);

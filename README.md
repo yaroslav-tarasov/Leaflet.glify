@@ -148,6 +148,21 @@ L.glify.lines({
 * `points(options)`
 * `shapes(options)`
 * `lines(options)`
+* `destroyByMap(map)` - destroy all glify layers attached to a specific map
+* `destroyAll()` - destroy all glify layers tracked by the current glify instance
+
+### Cleanup
+Call cleanup methods when the map/component is unmounted to free WebGL/canvas resources.
+
+```ts
+import glify from "leaflet.glify";
+
+// remove only layers attached to this map
+glify.destroyByMap(map);
+
+// or remove all layers managed by this glify instance
+glify.destroyAll();
+```
 
 
 ## Building

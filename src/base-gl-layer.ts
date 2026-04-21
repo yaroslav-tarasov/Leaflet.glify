@@ -344,44 +344,34 @@ export abstract class BaseGlLayer<
       throw new Error(notProperlyDefined("this.fragmentShader"));
     }
 
-    if(vertexShader) {
+    // Only fail on actual compile/link failures; info logs can contain warnings.
+    if (!gl.getShaderParameter(vertexShader, gl.COMPILE_STATUS)) {
+      const message = gl.getShaderInfoLog(vertexShader) || "Unknown vertex shader compile error";
+      const vertexShaderSource =
+        typeof settings.vertexShaderSource === "function"
+          ? settings.vertexShaderSource()
+          : settings.vertexShaderSource;
+      throw new Error(`${message}\n${vertexShaderSource ?? ""}`);
+    }
+
+    if (!gl.getShaderParameter(fragmentShader, gl.COMPILE_STATUS)) {
+      const message = gl.getShaderInfoLog(fragmentShader) || "Unknown fragment shader compile error";
       const fragmentShaderSource =
-      typeof settings.fragmentShaderSource === "function"
-        ? settings.fragmentShaderSource()
-        : settings.fragmentShaderSource;
-
-      const message = gl.getShaderInfoLog(vertexShader);
-      if (message && message.length > 0) {
-         /* message may be an error or a warning */
-         throw message + fragmentShaderSource;
-      }
+        typeof settings.fragmentShaderSource === "function"
+          ? settings.fragmentShaderSource()
+          : settings.fragmentShaderSource;
+      throw new Error(`${message}\n${fragmentShaderSource ?? ""}`);
     }
 
-    if(fragmentShader) {
-     const vertexShaderSource =
-     typeof settings.vertexShaderSource === "function"
-       ? settings.vertexShaderSource()
-       : settings.vertexShaderSource;
- 
-      const message = gl.getShaderInfoLog(fragmentShader);
-      if (message && message.length > 0) {
-         /* message may be an error or a warning */
-         throw message + vertexShaderSource;
-      }
-    }
-
-    if(program) {
-       const message = gl.getProgramInfoLog(program);
-       if (message && message.length > 0) {
-          /* message may be an error or a warning */
-          throw message;
-       }
-    } 
-    
- 
     gl.attachShader(program, vertexShader);
     gl.attachShader(program, fragmentShader);
     gl.linkProgram(program);
+
+    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+      const message = gl.getProgramInfoLog(program) || "Unknown program link error";
+      throw new Error(message);
+    }
+
     gl.useProgram(program);
     
     this.setupBlend();
@@ -427,6 +417,62 @@ export abstract class BaseGlLayer<
     this.layer.addTo(map ?? this.map);
     this.active = true;
     return this.render();
+  }
+
+  destroy(): this {
+    if (this.active && this.map && this.map.hasLayer(this.layer)) {
+      this.map.removeLayer(this.layer);
+    }
+    this.active = false;
+
+    const { gl } = this;
+    Object.keys(this.buffers).forEach((name) => {
+      const buffer = this.buffers[name];
+      if (buffer) {
+        gl.deleteBuffer(buffer);
+      }
+      delete this.buffers[name];
+    });
+
+    const texture = (this as { glTexture?: WebGLTexture | null }).glTexture;
+    if (texture) {
+      gl.deleteTexture(texture);
+      (this as { glTexture?: WebGLTexture | null }).glTexture = null;
+    }
+
+    if (this.program) {
+      gl.deleteProgram(this.program);
+      this.program = null;
+    }
+    if (this.vertexShader) {
+      gl.deleteShader(this.vertexShader);
+      this.vertexShader = null;
+    }
+    if (this.fragmentShader) {
+      gl.deleteShader(this.fragmentShader);
+      this.fragmentShader = null;
+    }
+
+    const tag = this.tag;
+    if (tag) {
+      const linkedLayers = BaseGlLayer.linkedLayers[tag];
+      if (linkedLayers) {
+        BaseGlLayer.linkedLayers[tag] = linkedLayers.filter(
+          (layer) => layer !== this
+        );
+        if (BaseGlLayer.linkedLayers[tag].length === 0) {
+          delete BaseGlLayer.linkedLayers[tag];
+        }
+      }
+
+      if (!CanvasOverlay.linkedLayers[tag]) {
+        delete BaseGlLayer.commonCanvas[tag];
+      }
+    }
+
+    this.attributeLocations = {};
+    this.uniformLocations = {};
+    return this;
   }
 
   remove(indices?: number | number[]): this {

@@ -171,3 +171,8 @@ function wget<T>(url: string): Promise<T> {
     request.send();
   });
 }
+
+// Example cleanup: release all layers attached to this map.
+window.addEventListener("beforeunload", () => {
+  glify.destroyByMap(map);
+});

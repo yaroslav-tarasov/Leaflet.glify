@@ -327,6 +327,10 @@ export class Texts extends BaseGlLayer<ITextsSettings> {
         }
       }
     } else if (this.dataFormat === "GeoJson.FeatureCollection") {
+      const pixel_ratio = window.devicePixelRatio || 1;
+      const font = roboto_font();
+      const font_size = Math.round(10 * pixel_ratio);
+      const font_metrics = fontMetrics(font, font_size, font_size * 0.2);
       const max = data.features.length;
       for (let i = 0; i < max; i++) {
         const feature = data.features[i] as Feature<GeoPoint>;
@@ -356,11 +360,6 @@ export class Texts extends BaseGlLayer<ITextsSettings> {
           chosenSize = size as number;
         }
 
-        let pixel_ratio = window.devicePixelRatio || 1;
-        let font = roboto_font();
-        var font_size = Math.round( 10 * pixel_ratio ); // font_size_input.value
-        var font_metrics = fontMetrics( font, font_size, font_size * 0.2 );
-        
         // [pixel.x, pixel.y]
        
       let str : string;  
