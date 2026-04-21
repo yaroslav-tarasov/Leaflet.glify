@@ -29,13 +29,8 @@ export class LineFeatureVertices {
   }
 
   fillFromCoordinates(coordinates: Position[] | Position[][]): void {
-    const {
-      color,
-      opacity,
-      project,
-      latitudeKey,
-      longitudeKey,
-    } = this.settings;
+    const { color, opacity, project, latitudeKey, longitudeKey } =
+      this.settings;
     for (let i = 0; i < coordinates.length; i++) {
       if (Array.isArray(coordinates[i][0])) {
         this.fillFromCoordinates(coordinates[i] as Position[]);

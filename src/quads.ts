@@ -1,13 +1,9 @@
 import earcut from "earcut";
-import PolygonLookup from "polygon-lookup";
-import geojsonFlatten from "geojson-flatten";
 import { LatLng, LeafletMouseEvent, Map } from "leaflet";
 import {
   Feature,
   FeatureCollection,
-  Geometry,
-  MultiPolygon,
-  Polygon,
+  Point as GeoPoint,
 } from "geojson";
 
 import {
@@ -15,23 +11,62 @@ import {
   ColorCallback,
   IBaseGlLayerSettings,
 } from "./base-gl-layer";
+
 import { ICanvasOverlayDrawEvent } from "./canvas-overlay";
 import * as Color from "./color";
-import { latLonToPixel } from "./utils";
+import { locationDistance, normalize_x, pixelInCircle } from "./utils";
 
 import { notProperlyDefined } from "./errors";
+import { IPointVertex } from "./points";
 
-export interface IShapesSettings extends IBaseGlLayerSettings {
+export type SizeCallback = (featureIndex: number, feature: any) => number;
+
+export interface IQuadsSettings extends IBaseGlLayerSettings {
   border?: boolean;
   borderOpacity?: number;
-  data: Feature | FeatureCollection | MultiPolygon;
+  data: number[][] | FeatureCollection<GeoPoint>;
+  size?: SizeCallback | number | null;
+  // TODO from points  // sensitivity?: number;
+  // TODO from points // sensitivityHover?: number;
 }
 
-export const defaults: Partial<IShapesSettings> = {
+interface IQuadVertex extends IPointVertex {
+  radius: number;
+}
+
+
+function getPointAtDistance(latlon: number[], d: number, brng: number) {
+  const toRad = Math.PI / 180;
+  const toDeg = 180 / Math.PI;
+
+  let [f1, l1] = latlon;
+  const R = 6378.137;
+  f1 = f1 * toRad;
+  l1 = l1 * toRad;
+  brng = brng * toRad;
+
+  const f2 = Math.asin(
+    Math.sin(f1) * Math.cos(d / R) +
+      Math.cos(f1) * Math.sin(d / R) * Math.cos(brng)
+  );
+
+  const l2 =
+    l1 +
+    Math.atan2(
+      Math.sin(brng) * Math.sin(d / R) * Math.cos(f1),
+      Math.cos(d / R) - Math.sin(f1) * Math.sin(f2)
+    );
+
+  return [f2 * toDeg, l2 * toDeg];
+}
+
+export const defaults: Partial<IQuadsSettings> = {
   color: Color.random,
   className: "",
   opacity: 0.5,
   borderOpacity: 1,
+  // TODO from points // sensitivity: 2,
+  // TODO from points // sensitivityHover: 0.03,
   shaderVariables: {
     vertex: {
       type: "FLOAT",
@@ -43,16 +78,26 @@ export const defaults: Partial<IShapesSettings> = {
       start: 2,
       size: 4,
     },
+    tex_coord: {
+      type: "FLOAT",
+      start: 6,
+      size: 2,
+    },
   },
   border: false,
 };
 
-export class Shapes extends BaseGlLayer {
+export class Quads extends BaseGlLayer {
   static defaults = defaults;
   static maps: Map[];
-  settings: Partial<IShapesSettings>;
-  bytes = 6;
-  polygonLookup: PolygonLookup | null = null;
+  settings: Partial<IQuadsSettings>;
+  bytes = 8;
+
+  latLngLookup: {
+    [key: string]: IQuadVertex[];
+  } = {};
+
+  allLatLngLookup: IQuadVertex[] = [];
 
   get border(): boolean {
     if (typeof this.settings.border !== "boolean") {
@@ -68,9 +113,9 @@ export class Shapes extends BaseGlLayer {
     return this.settings.borderOpacity;
   }
 
-  constructor(settings: Partial<IShapesSettings>) {
+  constructor(settings: Partial<IQuadsSettings>) {
     super(settings);
-    this.settings = { ...Shapes.defaults, ...settings };
+    this.settings = { ...Quads.defaults, ...settings };
 
     if (!settings.data) {
       throw new Error(notProperlyDefined("settings.data"));
@@ -90,20 +135,22 @@ export class Shapes extends BaseGlLayer {
     const vertexBuffer = this.getBuffer("vertex");
     const vertexArray = new Float32Array(vertices);
     const byteCount = vertexArray.BYTES_PER_ELEMENT;
-    const vertexLocation = this.getAttributeLocation("vertex");
     gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
     gl.bufferData(gl.ARRAY_BUFFER, vertexArray, gl.STATIC_DRAW);
-    gl.vertexAttribPointer(
-      vertexLocation,
-      2,
-      gl.FLOAT,
-      false,
-      byteCount * this.bytes,
-      0
-    );
-    gl.enableVertexAttribArray(vertexLocation);
 
-    //  gl.disable(gl.DEPTH_TEST);
+    // const vertexLocation = this.getAttributeLocation("vertex");
+
+    // gl.vertexAttribPointer(
+    //   vertexLocation,
+    //   2,
+    //   gl.FLOAT,
+    //   false,
+    //   byteCount * this.bytes,
+    //   0
+    // );
+
+    // gl.enableVertexAttribArray(vertexLocation);
+
     // ----------------------------
     // look up the locations for the inputs to our shaders.
     this.matrix = this.getUniformLocation("matrix");
@@ -120,15 +167,27 @@ export class Shapes extends BaseGlLayer {
     return this;
   }
 
+  getPointLookup(key: string): IQuadVertex[] {
+    return this.latLngLookup[key] || (this.latLngLookup[key] = []);
+  }
+
+  addLookup(lookup: IQuadVertex): this {
+    this.getPointLookup(lookup.key).push(lookup);
+    this.allLatLngLookup.push(lookup);
+    return this;
+  } 
+
+
   resetVertices(): this {
     this.vertices = [];
     this.vertexLines = [];
-    this.polygonLookup = new PolygonLookup();
+
+    this.latLngLookup = {};
+    this.allLatLngLookup = [];
 
     const {
       vertices,
       vertexLines,
-      polygonLookup,
       map,
       border,
       opacity,
@@ -136,6 +195,10 @@ export class Shapes extends BaseGlLayer {
       color,
       data,
     } = this;
+
+    const size = this.settings.size;
+    let sizeFn: SizeCallback | null = null;
+
     let pixel;
     let index;
     let features;
@@ -149,36 +212,17 @@ export class Shapes extends BaseGlLayer {
     let flat;
     let dim;
 
-    switch (data.type) {
-      case "Feature":
-        polygonLookup.loadFeatureCollection({
-          type: "FeatureCollection",
-          features: [data],
-        });
-        features = geojsonFlatten(data);
-        break;
-      case "MultiPolygon": {
-        const geometry: Geometry = {
-          type: "MultiPolygon",
-          coordinates: data.coordinates,
-        };
-        polygonLookup.loadFeatureCollection({
-          type: "FeatureCollection",
-          features: [
-            {
-              type: "Feature" as const,
-              properties: {},
-              geometry,
-            },
-          ],
-        });
-        features = geojsonFlatten(data);
-        break;
-      }
-      default:
-        polygonLookup.loadFeatureCollection(data);
-        features = data.features;
+    if (!size) {
+      throw new Error("size is not properly defined");
+    } else if (typeof size === "function") {
+      sizeFn = size;
     }
+
+    if (!(data.type === "FeatureCollection"))
+      throw new Error("FeatureCollection only");
+
+    features = data.features;
+
     const featureMax = features.length;
 
     if (!color) {
@@ -187,10 +231,18 @@ export class Shapes extends BaseGlLayer {
       colorFn = color;
     }
 
+    const texCoords = [
+      [1.0, 0.0],
+      [1.0, 1.0],
+      [0.0, 1.0],
+      [0.0, 0.0],
+    ];
+
     // -- data
     for (; featureIndex < featureMax; featureIndex++) {
-      feature = features[featureIndex];
+      feature = features[featureIndex] as Feature<GeoPoint>;
       triangles = [];
+      const triTextCoords = [];
 
       // use colorFn function here if it exists
       if (colorFn !== null) {
@@ -201,12 +253,32 @@ export class Shapes extends BaseGlLayer {
 
       const alpha = typeof chosenColor.a === "number" ? chosenColor.a : opacity;
 
-      coordinates = (feature.geometry || feature).coordinates;
-      if (!Array.isArray(coordinates[0])) {
-        continue;
+      const latlon = (feature.geometry || feature).coordinates;
+      // TODO // Not needed for flat array
+      // if (!Array.isArray(latlon[0])) {
+      //   continue;
+      // }
+
+      let radius;
+
+      if (sizeFn !== null) {
+        radius = sizeFn(featureIndex, feature);
+      } else {
+        radius = size as number;
       }
+
+      radius = radius * 1.414213562373095;
+      coordinates = [
+        [
+          getPointAtDistance(latlon, radius, 45),
+          getPointAtDistance(latlon, radius, 135),
+          getPointAtDistance(latlon, radius, 225),
+          getPointAtDistance(latlon, radius, 315),
+        ],
+      ];
+
       flat = earcut.flatten(coordinates);
-      indices = earcut(flat.vertices, flat.holes, flat.dimensions);
+      indices = [2, 3, 0, 0, 1, 2]; //  indices = earcut(flat.vertices, flat.holes, flat.dimensions);
       dim = coordinates[0][0].length;
       const { longitudeKey, latitudeKey } = this;
       for (let i = 0, iMax = indices.length; i < iMax; i++) {
@@ -216,12 +288,14 @@ export class Shapes extends BaseGlLayer {
             flat.vertices[index * dim + latitudeKey],
             flat.vertices[index * dim + longitudeKey]
           );
+
+          triTextCoords.push(texCoords[index]);
         } else {
           throw new Error("unhandled polygon");
         }
       }
 
-      for (let i = 0, iMax = triangles.length; i < iMax; i) {
+      for (let i = 0, iMax = triangles.length, cnt = 0; i < iMax; cnt++) {
         pixel = map.project(new LatLng(triangles[i++], triangles[i++]), 0);
         vertices.push(
           pixel.x,
@@ -229,9 +303,32 @@ export class Shapes extends BaseGlLayer {
           chosenColor.r,
           chosenColor.g,
           chosenColor.b,
-          alpha
+          alpha,
+          triTextCoords[cnt][0],
+          triTextCoords[cnt][1]
         );
       }
+
+      let key =
+      latlon[latitudeKey].toFixed(2) +
+      "x" +
+      latlon[longitudeKey].toFixed(2);
+      
+      let llCenter = new LatLng(latlon[latitudeKey], latlon[longitudeKey]);
+      let pCenter = map.project(llCenter, 0 );
+      let pRight  = map.project(new LatLng(coordinates[0][0][0], coordinates[0][0][1]), 0);
+      
+      const vertex: IQuadVertex = {
+        latLng: llCenter,
+        key,
+        pixel: map.project(llCenter, 0),
+        chosenColor,
+        chosenSize : radius,
+        feature,
+        radius: Math.abs(pCenter.x - pRight.x)
+      };
+      this.addLookup(vertex);
+
 
       if (border) {
         const lines = [];
@@ -251,7 +348,6 @@ export class Shapes extends BaseGlLayer {
 
 
         for (let i = 0, iMax = lines.length; i < iMax; i++) {
-          // pixel = latLonToPixel(lines[i++], lines[i++]);
           pixel = map.project(lines[i], 0);
           vertexLines.push(
             pixel.x,
@@ -337,59 +433,127 @@ export class Shapes extends BaseGlLayer {
     return this;
   }
 
+  lookup(coords: LatLng): IQuadVertex | null {
+    const latMax: number = coords.lat + 0.03;
+    const lngMax: number = coords.lng + 0.03;
+    const matches: IQuadVertex[] = [];
+    let lat = coords.lat - 0.03;
+    let lng: number;
+    let foundI: number;
+    let foundMax: number;
+    let found: IQuadVertex[];
+    let key: string;
+
+    for (; lat <= latMax; lat += 0.01) {
+      lng = coords.lng - 0.03;
+      for (; lng <= lngMax; lng += 0.01) {
+        key = lat.toFixed(2) + "x" + lng.toFixed(2);
+        found = this.latLngLookup[key];
+        if (found) {
+          foundI = 0;
+          foundMax = found.length;
+          for (; foundI < foundMax; foundI++) {
+            matches.push(found[foundI]);
+          }
+        }
+      }
+    }
+
+    const { map } = this;
+
+    // try matches first, if it is empty, try the data, and hope it isn't too big
+    return Quads.closest(
+      coords,
+      matches.length > 0 ? matches : this.allLatLngLookup,
+      map
+    );
+  } 
+
+  static closest(
+    targetLocation: LatLng,
+    points: IQuadVertex[],
+    map: Map
+  ): IQuadVertex | null {
+    if (points.length < 1) return null;
+    return points.reduce((prev, curr) => {
+      const prevDistance = locationDistance(targetLocation, prev.latLng, map);
+      const currDistance = locationDistance(targetLocation, curr.latLng, map);
+      return prevDistance < currDistance ? prev : curr;
+    });
+  }
+  
   // attempts to click the top-most Shapes instance
   static tryClick(
     e: LeafletMouseEvent,
     map: Map,
-    instances: Shapes[],
+    instances: Quads[],
     id : number
   ): boolean | undefined {
-    let foundPolygon: Feature<Polygon> | null = null;
-    let foundShapes: Shapes | null = null;
-    instances.forEach(function (_instance: Shapes): void {
-      if (!_instance.active) return;
-      if (_instance.map !== map) return;
-      if (!_instance.polygonLookup) return;
+    const closestFromEach: IQuadVertex[] = [];
+    const instancesLookup: { [key: string]: Quads } = {};
+    let result;
+    let pointLookup: IQuadVertex | null;
 
-      const polygon = _instance.polygonLookup.search(
-        e.latlng.lat,
-        e.latlng.lng
-      );
-      if (polygon) {
-        foundShapes = _instance;
-        foundPolygon = polygon;
-      }
+    instances.forEach(function (_instance: Quads): void {
+       if (!_instance.active) return;
+       if (_instance.map !== map) return;
+       pointLookup = _instance.lookup(e.latlng);
+       if (pointLookup === null) return;
+       instancesLookup[pointLookup.key] = _instance;
+       closestFromEach.push(pointLookup);
+
     });
 
-    if (foundShapes && foundPolygon) {
-      const result = (foundShapes as Shapes).click(e, foundPolygon, id);
-      return result !== undefined ? result : undefined;
+    if (closestFromEach.length < 1) return;
+
+    const found = this.closest(e.latlng, closestFromEach, map);
+
+    if (!found) return;
+
+    const instance = instancesLookup[found.key];
+    if (!instance) return;
+    // const { sensitivity } = instance;
+    const foundLatLng = found.latLng;
+    const xy = map.latLngToLayerPoint(foundLatLng);
+
+    const scale = Math.pow(2, map.getZoom());
+    const width = map.getPixelBounds().getSize().x;
+    let a0 = 2.0 / width * scale;
+    let radius =  a0 * found.radius * 0.5 * width;
+
+    if (
+      pixelInCircle(xy, e.layerPoint, radius * 1)// (sensitivity ?? 1))
+    ) {
+      result = instance.click(e, found.feature || found.latLng, id);
+      return result !== undefined ? result : true;
     }
+    return undefined;
+    
   }
 
   // hovers all touching Shapes instances
   static tryHover(
     e: LeafletMouseEvent,
     map: Map,
-    instances: Shapes[]
+    instances: Quads[]
   ): Array<boolean | undefined> {
     const results: boolean[] = [];
     let feature;
 
-    instances.forEach((_instance: Shapes): void => {
-      if (!_instance.active) return;
-      if (_instance.map !== map) return;
-      if (!_instance.polygonLookup) return;
+    // instances.forEach((_instance: Quads): void => {
+    //   if (!_instance.active) return;
+    //   if (_instance.map !== map) return;
+    //   if (!_instance.polygonLookup) return;
 
-      feature = _instance.polygonLookup.search(e.latlng.lat, e.latlng.lng);
+    //   feature = _instance.polygonLookup.search(e.latlng.lng, e.latlng.lat);
 
-      if (feature) {
-        const result = _instance.hover(e, feature);
-        if (result !== undefined) {
-          results.push(result);
-        }
-      }
-    });
+    //   if (feature) {
+    //     const result = _instance.hover(e, feature);
+    //     if (result !== undefined) {
+    //       results.push(result);
+    //     }
+    //   }
+    // });
 
     return results;
   }

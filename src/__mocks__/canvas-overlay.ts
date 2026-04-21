@@ -1,10 +1,10 @@
-import { ICanvasOverlayDrawEvent } from "../canvas-overlay";
+import { ICanvasOverlay, ICanvasOverlayDrawEvent } from "../canvas-overlay";
 import { Map } from "leaflet";
 
 export class CanvasOverlay {
   _userDrawFunc: (e: ICanvasOverlayDrawEvent) => void;
-  constructor(userDrawFunc: (e: ICanvasOverlayDrawEvent) => void) {
-    this._userDrawFunc = userDrawFunc;
+  constructor( ico: ICanvasOverlay) {
+    this._userDrawFunc = ico.userDrawFunc;
   }
 
   canvas: HTMLCanvasElement = (() => {
@@ -18,4 +18,6 @@ export class CanvasOverlay {
   }
 
   redraw(): void {}
+
+  isVisible(): boolean { return true; }
 }

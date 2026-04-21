@@ -43,6 +43,7 @@ describe("BaseGlLayer", () => {
   function fakeEvent(layer: TestLayer): LeafletMouseEvent {
     return {
       type: "fake event",
+      popup: null,
       latlng: new LatLng(1, 1),
       layerPoint: new Point(1, 1),
       containerPoint: new Point(1, 1),
@@ -272,8 +273,8 @@ describe("BaseGlLayer", () => {
       expect(layer.gl).toBeInstanceOf(WebGLRenderingContext);
     });
     it("provides a drawOnCanvas lambda, that calls layer.drawOnCanvas", () => {
-      const layer = getGlLayer();
-      jest.spyOn(layer, "drawOnCanvas");
+      const gllayer = getGlLayer();
+      jest.spyOn(gllayer, "drawOnCanvas");
       const event: ICanvasOverlayDrawEvent = {
         canvas: document.createElement("canvas"),
         bounds: new LatLngBounds(new LatLng(1, 1), new LatLng(10, 10)),
@@ -282,9 +283,10 @@ describe("BaseGlLayer", () => {
         size: new Point(10, 10),
         zoomScale: 1,
         zoom: 1,
+        clear : undefined
       };
-      layer.layer._userDrawFunc(event);
-      expect(layer.drawOnCanvas).toHaveBeenCalledWith(event);
+      gllayer.layer._userDrawFunc(event);
+      expect(gllayer.drawOnCanvas).toHaveBeenCalledWith(event);
     });
   });
 

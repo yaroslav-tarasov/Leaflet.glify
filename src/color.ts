@@ -31,6 +31,28 @@ export function fromHex(hex: string): IColor | null {
   return { r: r / 255, g: g / 255, b: b / 255, a: 1 };
 }
 
+export function fromARGBHex(hex: string): IColor | null {
+  if (hex.length < 6) return null;
+  hex = hex.toLowerCase();
+
+  if (hex[0] === "#") {
+    hex = hex.substring(1, hex.length);
+  }
+
+  const a = parseInt(hex[0] + hex[1], 16);
+  const r = parseInt(hex[2] + hex[3], 16);
+  const g = parseInt(hex[4] + hex[5], 16);
+  const b = parseInt(hex[6] + hex[7], 16);
+  return { r: r / 255, g: g / 255, b: b / 255, a: a / 255 };
+}
+
+
+export function toHex ( color: IColor ): string {
+  return "#" + ('00' + Math.trunc(color.r * 255).toString(16)).slice(-2) 
+             + ('00' + Math.trunc(color.g * 255).toString(16)).slice(-2)
+             + ('00' + Math.trunc(color.b * 255).toString(16)).slice(-2);
+}
+
 export function random(): IColor {
   return {
     r: Math.random(),

@@ -279,50 +279,10 @@ describe("Lines", () => {
       jest.spyOn(lines.map, "project").mockReturnValue(new Point(1, 2));
       lines.resetVertices();
       const expected = [
-        1,
-        2,
-        3,
-        4,
-        5,
-        6,
-        1,
-        2,
-        3,
-        4,
-        5,
-        6,
-        1,
-        2,
-        3,
-        4,
-        5,
-        6,
-        1,
-        2,
-        3,
-        4,
-        5,
-        6,
+        1, 2, 3, 4, 5, 6, 1, 2, 3, 4, 5, 6, 1, 2, 3, 4, 5, 6, 1, 2, 3, 4, 5, 6,
       ];
       const expectedVerticesArray = [
-        1,
-        2,
-        3,
-        4,
-        5,
-        6,
-        1,
-        2,
-        3,
-        4,
-        5,
-        6,
-        1,
-        2,
-        3,
-        4,
-        5,
-        6,
+        1, 2, 3, 4, 5, 6, 1, 2, 3, 4, 5, 6, 1, 2, 3, 4, 5, 6,
       ];
       expect(lines.vertices.length).toBe(1);
       expect(lines.vertices[0].array).toEqual(expectedVerticesArray);
@@ -351,6 +311,7 @@ describe("Lines", () => {
         size: new Point(10, 10),
         zoomScale: 1,
         zoom: 1,
+        clear : undefined,
         ...event,
       });
     }
@@ -512,6 +473,7 @@ describe("Lines", () => {
         layerPoint: new Point(1, 1),
         containerPoint: new Point(1, 1),
         originalEvent: new MouseEvent("click"),
+        popup: null,
       };
     });
     afterEach(() => {
@@ -596,6 +558,7 @@ describe("Lines", () => {
         layerPoint: new Point(1, 1),
         containerPoint: new Point(1, 1),
         originalEvent: new MouseEvent("mousemove"),
+        popup: null,
       };
     });
     afterEach(() => {

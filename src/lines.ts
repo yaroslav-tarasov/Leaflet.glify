@@ -87,19 +87,19 @@ export class Lines extends BaseGlLayer<ILinesSettings> {
     const { canvas, gl, layer, mapMatrix } = this;
     const vertexBuffer = this.getBuffer("vertex");
     gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, this.allVerticesTyped, gl.STATIC_DRAW);
 
     const size = this.allVerticesTyped.BYTES_PER_ELEMENT;
-    gl.bufferData(gl.ARRAY_BUFFER, this.allVerticesTyped, gl.STATIC_DRAW);
-    const vertexLocation = this.getAttributeLocation("vertex");
-    gl.vertexAttribPointer(
-      vertexLocation,
-      2,
-      gl.FLOAT,
-      false,
-      size * this.bytes,
-      0
-    );
-    gl.enableVertexAttribArray(vertexLocation);
+    // const vertexLocation = this.getAttributeLocation("vertex");
+    // gl.vertexAttribPointer(
+    //   vertexLocation,
+    //   2,
+    //   gl.FLOAT,
+    //   false,
+    //   size * this.bytes,
+    //   0
+    // );
+    // gl.enableVertexAttribArray(vertexLocation);
 
     //  gl.disable(gl.DEPTH_TEST);
     // ----------------------------
@@ -147,7 +147,7 @@ export class Lines extends BaseGlLayer<ILinesSettings> {
     if (typeof weight === "function") {
       weightFn = weight;
     }
-
+    
     const project = map.project.bind(map);
     // -- data
     const vertices: LineFeatureVertices[] = [];
@@ -172,13 +172,18 @@ export class Lines extends BaseGlLayer<ILinesSettings> {
         weight: chosenWeight,
         opacity,
       });
+        
 
+      
       featureVertices.fillFromCoordinates(feature.geometry.coordinates);
       vertices.push(featureVertices);
       if (eachVertex) {
         eachVertex(featureVertices);
       }
+
     }
+
+
 
     /*
     Transforming lines according to the rule:
@@ -237,12 +242,47 @@ export class Lines extends BaseGlLayer<ILinesSettings> {
       weight,
       aPointSize,
       bytes,
+      layer
     } = this;
-    const { scale, offset, zoom } = e;
+    const { scale, offset, zoom, clear } = e;
     this.scale = scale;
-    const pointSize = Math.max(zoom - 4.0, 4.0);
-    gl.clear(gl.COLOR_BUFFER_BIT);
+    const pointSize = Math.max(zoom - 4.0, 1.0);
+
+    if(this.tag){
+      if( clear ){
+        gl.clear(gl.COLOR_BUFFER_BIT);
+      }
+    } else {
+      gl.clear(gl.COLOR_BUFFER_BIT);
+    }
+
+    if ( this.settings.fadeOnZoom &&
+         zoom < this.settings.fadeOnZoom || (!layer.isVisible()) )
+      return this;
+
     gl.viewport(0, 0, canvas.width, canvas.height);
+    gl.useProgram(this.program);
+
+/////////////////////////////////////////////////////////////////        
+    const size = this.allVerticesTyped.BYTES_PER_ELEMENT;
+    const vertexLocation = this.getAttributeLocation("vertex");
+    gl.enableVertexAttribArray(vertexLocation);
+    
+    const vertexBuffer = this.getBuffer("vertex");
+    gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
+
+    gl.vertexAttribPointer(
+      vertexLocation,
+      2,
+      gl.FLOAT,
+      false,
+      size * bytes,
+      0
+    );
+
+    
+///////////////////////////////////////////////////////////
+
     gl.vertexAttrib1f(aPointSize, pointSize);
     mapMatrix.setSize(canvas.width, canvas.height).scaleTo(scale);
     if (zoom > 18) {
@@ -298,6 +338,10 @@ export class Lines extends BaseGlLayer<ILinesSettings> {
         allVertexCount += vertexCount;
       }
     }
+
+    gl.disableVertexAttribArray(vertexLocation);
+    //gl.bindBuffer(gl.ARRAY_BUFFER, null);
+
     return this;
   }
 
@@ -305,20 +349,19 @@ export class Lines extends BaseGlLayer<ILinesSettings> {
   static tryClick(
     e: LeafletMouseEvent,
     map: Map,
-    instances: Lines[]
+    instances: Lines[],
+    id : number
   ): boolean | undefined {
-    let foundFeature: Feature<LineString | MultiLineString> | null = null;
-    let foundLines: Lines | null = null;
+    // let foundFeature: Feature<LineString | MultiLineString> | null = null;
+    let foundFeatures: Array<Feature<LineString | MultiLineString>> | null = null;
+    // let foundLines: Lines | null = null;
+    let foundLines: Array<Lines> | null = null;
+    let foundFeaturesSet: Set<Feature<LineString | MultiLineString>>;
+
 
     instances.forEach((instance: Lines): void => {
-      const {
-        latitudeKey,
-        longitudeKey,
-        sensitivity,
-        weight,
-        scale,
-        active,
-      } = instance;
+      const { latitudeKey, longitudeKey, sensitivity, weight, scale, active } =
+        instance;
       if (!active) return;
       if (instance.map !== map) return;
       function checkClick(
@@ -336,8 +379,19 @@ export class Lines extends BaseGlLayer<ILinesSettings> {
           coordinate[latitudeKey]
         );
         if (distance <= sensitivity + chosenWeight / scale) {
-          foundFeature = feature;
-          foundLines = instance;
+          // foundFeature = feature;
+          // foundLines = instance;
+          if (foundFeatures === null){  
+            foundFeatures = new Array<Feature<LineString | MultiLineString>>;
+            foundLines = new Array<Lines>;
+            foundFeaturesSet= new Set<Feature<LineString | MultiLineString>>;
+          }
+
+          if (!foundFeaturesSet.has(feature)) {
+              foundFeaturesSet.add(feature);
+              foundFeatures?.push(feature);
+              foundLines?.push(instance);
+          }
         }
       }
       instance.data.features.forEach(
@@ -348,10 +402,10 @@ export class Lines extends BaseGlLayer<ILinesSettings> {
           if (type === "LineString") {
             for (let i = 1; i < coordinates.length; i++) {
               checkClick(
-                coordinates[i] as Position,
-                coordinates[i - 1] as Position,
+                coordinates[i],
+                coordinates[i - 1],
                 feature,
-                chosenWeight
+                chosenWeight,
               );
             }
           } else if (type === "MultiLineString") {
@@ -364,15 +418,15 @@ export class Lines extends BaseGlLayer<ILinesSettings> {
                   const lastPositions =
                     prevCoordinates[prevCoordinates.length - 1];
                   checkClick(
-                    lastPositions as Position,
-                    coordinates[i][j] as Position,
+                    lastPositions,
+                    coordinates[i][j],
                     feature,
                     chosenWeight
                   );
                 } else if (j > 0) {
                   checkClick(
-                    coordinates[i][j] as Position,
-                    coordinates[i][j - 1] as Position,
+                    coordinates[i][j],
+                    coordinates[i][j - 1],
                     feature,
                     chosenWeight
                   );
@@ -384,8 +438,14 @@ export class Lines extends BaseGlLayer<ILinesSettings> {
       );
     });
 
-    if (foundLines && foundFeature) {
-      const result = (foundLines as Lines).click(e, foundFeature);
+    if (foundLines && foundFeatures) {
+
+      let result = undefined;
+
+      for ( let i=0; i < (foundLines as Array<Lines>).length; ++i ) { 
+         result = (foundLines[i] as Lines).click(e, foundFeatures[i], id);
+      }
+
       return result !== undefined ? result : undefined;
     }
   }
@@ -436,9 +496,8 @@ export class Lines extends BaseGlLayer<ILinesSettings> {
       if (!instance.active) return;
       if (map !== instance.map) return;
       const oldHoveredFeatures = hoveringFeatures;
-      const newHoveredFeatures: Array<
-        Feature<LineString | MultiLineString>
-      > = [];
+      const newHoveredFeatures: Array<Feature<LineString | MultiLineString>> =
+        [];
       instance.hoveringFeatures = newHoveredFeatures;
       // Check if e.latlng is inside the bbox of the features
       const bounds = geoJSON(data.features).getBounds();
@@ -453,8 +512,8 @@ export class Lines extends BaseGlLayer<ILinesSettings> {
             if (type === "LineString") {
               for (let i = 1; i < coordinates.length; i++) {
                 isHovering = checkHover(
-                  coordinates[i] as Position,
-                  coordinates[i - 1] as Position,
+                  coordinates[i],
+                  coordinates[i - 1],
                   feature,
                   chosenWeight
                 );
@@ -470,16 +529,16 @@ export class Lines extends BaseGlLayer<ILinesSettings> {
                     const lastPositions =
                       prevCoordinates[prevCoordinates.length - 1];
                     isHovering = checkHover(
-                      lastPositions as Position,
-                      coordinates[i][j] as Position,
+                      lastPositions,
+                      coordinates[i][j],
                       feature,
                       chosenWeight
                     );
                     if (isHovering) break;
                   } else if (j > 0) {
                     isHovering = checkHover(
-                      coordinates[i][j] as Position,
-                      coordinates[i][j - 1] as Position,
+                      coordinates[i][j],
+                      coordinates[i][j - 1],
                       feature,
                       chosenWeight
                     );
