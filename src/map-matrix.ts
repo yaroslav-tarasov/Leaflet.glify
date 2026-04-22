@@ -10,14 +10,17 @@ export class MapMatrix {
       0,
       0,
       0,
+
       0,
       -2 / height,
       0,
       0,
+
       0,
       0,
       0,
       0,
+
       -1,
       1,
       0,
@@ -41,4 +44,6 @@ export class MapMatrix {
     array[5] *= scale;
     return this;
   }
+
 }
+

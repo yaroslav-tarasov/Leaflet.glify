@@ -14,5 +14,8 @@
   "testEnvironment": "jsdom",
   "transform": {
     "^.+\\.glsl": "jest-raw-loader"
-  }
+  },
+  "transformIgnorePatterns": [
+      "node_modules/(?!troublesome-dependency/.*)"  
+  ]
 }

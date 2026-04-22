@@ -9,9 +9,15 @@
     "/src",
     "/dist"
   ],
+
+  "jest": {
+    "testPathIgnorePatterns": ["*.\\.test\\.js", "/dist/"],
+    "watchPathIgnorePatterns" : ["*.\\.test\\.js", "/dist/"],
+    "verbose": true
+  }, 
   "scripts": {
-    "test": "jest",
-    "build": "webpack --config webpack.config.js",
+    "test": "export NODE_OPTIONS='$NODE_OPTIONS --experimental-vm-modules' && jest --transformIgnorePatterns \"node_modules/(?!@toolz/allow)/\" --env=jsdom",
+    "build": "export NODE_OPTIONS=--openssl-legacy-provider && webpack --config webpack.config.js",
     "coverage": "jest --coverage --coverage-provider v8 && codecov",
     "serve": "webpack-dev-server --config webpack.config.dev.js --open",
     "prepublish-gh-pages": "webpack --config webpack.config.gh-pages.js",
@@ -81,6 +87,7 @@
     "webpack-cli": "^3.3.12",
     "webpack-dev-server": "^3.11.0"
   },
+
   "peerDependencies": {
     "leaflet": "1.7.1"
   }

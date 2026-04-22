@@ -14,10 +14,15 @@ export interface IShaderVariable {
 
 export type EventCallback = (
   e: LeafletMouseEvent,
-  feature: any
+  feature: any,
+  id?: number
 ) => boolean | void;
 
-export type SetupHoverCallback = (map: Map, hoverWait?: number, immediate?: false) => void;
+export type SetupHoverCallback = (
+  map: Map,
+  hoverWait?: number,
+  immediate?: false
+) => void;
 
 export interface IBaseGlLayerSettings {
   data: any;
@@ -25,6 +30,7 @@ export interface IBaseGlLayerSettings {
   latitudeKey: number;
   pane: string;
   map: Map;
+  canvasTag?: string;
   shaderVariables?: {
     [name: string]: IShaderVariable;
   };
@@ -43,6 +49,7 @@ export interface IBaseGlLayerSettings {
   opacity?: number;
   preserveDrawingBuffer?: boolean;
   hoverWait?: number;
+  fadeOnZoom?: FadeOnZoomCallback | number;
 }
 
 export const defaultPane = "overlayPane";
@@ -50,6 +57,8 @@ export const defaultHoverWait = 250;
 export const defaults: Partial<IBaseGlLayerSettings> = {
   pane: defaultPane,
 };
+
+export type FadeOnZoomCallback = (feature: any) => number;
 
 export type ColorCallback = (featureIndex: number, feature: any) => IColor;
 
@@ -75,6 +84,9 @@ export abstract class BaseGlLayer<
   uniformLocations: { [name: string]: WebGLUniformLocation } = {};
 
   static defaults = defaults;
+  static commonCanvas :  { [name: string]: HTMLCanvasElement } = {}; 
+  static linkedLayers : { [name: string]: Array<BaseGlLayer> } = {}; 
+
 
   abstract render(): this;
 
@@ -143,6 +155,23 @@ export abstract class BaseGlLayer<
     return this.settings.color ?? null;
   }
 
+  get tag():  string | null {
+    return this.settings.canvasTag ?? null;
+  }
+
+  public get countVisible(): number {
+    if(this.settings && this.settings.canvasTag){
+       let counter = 0;
+       for( let c =0; c < BaseGlLayer.linkedLayers[this.settings.canvasTag].length; ++c){
+           if (BaseGlLayer.linkedLayers[this.settings.canvasTag][c].layer.isVisible()) counter++;      
+       }
+       return counter; 
+    }
+
+    return 1;
+  }
+
+
   constructor(settings: Partial<IBaseGlLayerSettings>) {
     this.settings = { ...defaults, ...settings };
     this.mapMatrix = new MapMatrix();
@@ -154,12 +183,37 @@ export abstract class BaseGlLayer<
     this.vertices = null;
     this.vertexLines = null;
     const preserveDrawingBuffer = Boolean(settings.preserveDrawingBuffer);
-    const layer = (this.layer = new CanvasOverlay(
-      (context: ICanvasOverlayDrawEvent) => {
-        return this.drawOnCanvas(context);
-      },
-      this.pane
-    ).addTo(this.map));
+
+    if (this.tag) {
+      let tag = this.tag;
+      this.layer = new CanvasOverlay(
+        { userDrawFunc: (context: ICanvasOverlayDrawEvent) => 
+               {           return this.drawOnCanvas(context); },
+          tag: tag 
+        },
+        this.pane );
+
+      if (BaseGlLayer.commonCanvas[this.tag] === undefined) {
+        BaseGlLayer.commonCanvas[this.tag] = this.layer.canvas = this.layer.canvas ?? document.createElement("canvas");  
+      } else {  
+        this.layer.canvas = BaseGlLayer.commonCanvas[this.tag];  
+      }
+      
+      if (BaseGlLayer.linkedLayers[tag] === undefined)
+         BaseGlLayer.linkedLayers[tag] = new Array();
+
+      BaseGlLayer.linkedLayers[tag].push(this);
+
+    } else {
+      this.layer = new CanvasOverlay( { userDrawFunc:
+        (context: ICanvasOverlayDrawEvent) => {
+          return this.drawOnCanvas(context);
+        } },
+        this.pane );
+    } 
+
+    const layer = this.layer.addTo(this.map);
+
     if (!layer.canvas) {
       throw new Error(notProperlyDefined("layer.canvas"));
     }
@@ -170,11 +224,10 @@ export abstract class BaseGlLayer<
     if (this.className) {
       canvas.className += " " + this.className;
     }
-    this.gl = (canvas.getContext("webgl2", { preserveDrawingBuffer }) ??
-      canvas.getContext("webgl", { preserveDrawingBuffer }) ??
-      canvas.getContext("experimental-webgl", {
-        preserveDrawingBuffer,
-      })) as WebGLRenderingContext;
+    this.gl = (canvas.getContext("webgl2", { preserveDrawingBuffer }) 
+      ?? canvas.getContext("webgl", { preserveDrawingBuffer }) 
+      ?? canvas.getContext("experimental-webgl", {preserveDrawingBuffer})
+      ) as WebGLRenderingContext;
   }
 
   abstract drawOnCanvas(context: ICanvasOverlayDrawEvent): this;
@@ -252,12 +305,13 @@ export abstract class BaseGlLayer<
   }
 
   setupFragmentShader(): this {
-    const gl = this.gl;
-    const settings = this.settings;
+    const { gl, settings } = this;
+
     const fragmentShaderSource =
       typeof settings.fragmentShaderSource === "function"
         ? settings.fragmentShaderSource()
         : settings.fragmentShaderSource;
+
     const fragmentShader = gl.createShader(gl.FRAGMENT_SHADER);
     if (!fragmentShader) {
       throw new Error("Not able to create fragment");
@@ -275,22 +329,72 @@ export abstract class BaseGlLayer<
 
   setupProgram(): this {
     // link shaders to create our program
-    const { gl, vertexShader, fragmentShader } = this;
+    const { gl, settings, vertexShader, fragmentShader } = this;
     const program = gl.createProgram();
     if (!program) {
       throw new Error("Not able to create program");
     }
+
     if (!vertexShader) {
+
       throw new Error(notProperlyDefined("this.vertexShader"));
     }
+
     if (!fragmentShader) {
       throw new Error(notProperlyDefined("this.fragmentShader"));
     }
 
+    if(vertexShader) {
+      const fragmentShaderSource =
+      typeof settings.fragmentShaderSource === "function"
+        ? settings.fragmentShaderSource()
+        : settings.fragmentShaderSource;
+
+      const message = gl.getShaderInfoLog(vertexShader);
+      if (message && message.length > 0) {
+         /* message may be an error or a warning */
+         throw message + fragmentShaderSource;
+      }
+    }
+
+    if(fragmentShader) {
+     const vertexShaderSource =
+     typeof settings.vertexShaderSource === "function"
+       ? settings.vertexShaderSource()
+       : settings.vertexShaderSource;
+ 
+      const message = gl.getShaderInfoLog(fragmentShader);
+      if (message && message.length > 0) {
+         /* message may be an error or a warning */
+         throw message + vertexShaderSource;
+      }
+    }
+
+    if(program) {
+       const message = gl.getProgramInfoLog(program);
+       if (message && message.length > 0) {
+          /* message may be an error or a warning */
+          throw message;
+       }
+    } 
+    
+ 
     gl.attachShader(program, vertexShader);
     gl.attachShader(program, fragmentShader);
     gl.linkProgram(program);
     gl.useProgram(program);
+    
+    this.setupBlend();
+
+    this.program = program;
+
+    return this;
+  }
+
+  setupBlend() : this {
+    
+    const { gl} = this;
+
     gl.blendFuncSeparate(
       gl.SRC_ALPHA,
       gl.ONE_MINUS_SRC_ALPHA,
@@ -299,10 +403,25 @@ export abstract class BaseGlLayer<
     );
     gl.enable(gl.BLEND);
 
-    this.program = program;
-
     return this;
+
+  } 
+
+  loadTexture( nameOrElement : string | HTMLImageElement, format = this.gl.RGBA, generate_mipmap = true, nearest = false, repeat = false ): WebGLTexture | null {
+    const { gl } = this;
+    var tex = gl.createTexture();
+    
+    if ( typeof nameOrElement === 'string') {
+       var image = new Image();
+       image.onload = function() { BaseGlLayer.setTexImage( gl, image, tex!, format, generate_mipmap, nearest, repeat ); };
+       image.src = nameOrElement as string;
+    } else {
+      BaseGlLayer.setTexImage( gl, nameOrElement, tex!, format, generate_mipmap, nearest, repeat );
+    }
+
+    return tex;
   }
+
 
   addTo(map?: Map): this {
     this.layer.addTo(map ?? this.map);
@@ -378,22 +497,22 @@ export abstract class BaseGlLayer<
     }
     const loc = this.gl.getUniformLocation(this.program, name);
     if (!loc) {
-      throw new Error("Cannot find location");
+      throw new Error("Cannot find '" + name + "' location");
     }
     return (this.uniformLocations[name] = loc);
   }
 
-  click(e: LeafletMouseEvent, feature: any): boolean | undefined {
+  click(e: LeafletMouseEvent, feature: any, id?: number): boolean | undefined {
     if (!this.settings.click) return;
-    const result = this.settings.click(e, feature);
+    const result = this.settings.click(e, feature, id);
     if (result !== undefined) {
       return result;
     }
   }
 
-  hover(e: LeafletMouseEvent, feature: any): boolean | undefined {
+  hover(e: LeafletMouseEvent, feature: any, id?: number): boolean | undefined {
     if (!this.settings.hover) return;
-    const result = this.settings.hover(e, feature);
+    const result = this.settings.hover(e, feature, id);
     if (result !== undefined) {
       return result;
     }
@@ -403,4 +522,38 @@ export abstract class BaseGlLayer<
     if (!this.settings.hoverOff) return;
     this.settings.hoverOff(e, feature);
   }
+
+
+  static setTexImage(  gl: WebGLRenderingContext | WebGL2RenderingContext, image: HTMLImageElement, tex : WebGLTexture, format: number, generate_mipmap: boolean, nearest_filtering: boolean, repeat_uv: boolean ) {
+
+    gl.bindTexture( gl.TEXTURE_2D, tex );
+    gl.texImage2D( gl.TEXTURE_2D, 0, format, format, gl.UNSIGNED_BYTE, image );
+
+    if ( !nearest_filtering ) {
+        gl.texParameteri( gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR );
+    } else {
+        gl.texParameteri( gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST );
+    }
+
+    if ( repeat_uv ) {
+        gl.texParameteri( gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT );
+        gl.texParameteri( gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT );        
+    } else {
+        gl.texParameteri( gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE );
+        gl.texParameteri( gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE );
+    }
+
+    if ( generate_mipmap ) {
+        gl.texParameteri( gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR );
+        gl.generateMipmap( gl.TEXTURE_2D );
+    } else {
+        if ( !nearest_filtering ) {
+            gl.texParameteri( gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR );
+        } else {
+            gl.texParameteri( gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST );
+        }
+    }
+    gl.bindTexture( gl.TEXTURE_2D, null );
+  }
+
 }

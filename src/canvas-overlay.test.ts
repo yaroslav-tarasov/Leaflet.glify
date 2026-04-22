@@ -1,4 +1,4 @@
-import { CanvasOverlay } from "./canvas-overlay";
+import { CanvasOverlay, unclampedLatLngBoundsToNewLayerBounds, unclampedProject } from "./canvas-overlay";
 import {
   Bounds,
   LatLng,
@@ -14,17 +14,17 @@ import {
 describe("CanvasOverlay", () => {
   describe("constructor", () => {
     it("sets this._userDrawFunc and this.pane from argument", () => {
-      const fn = () => {};
+      const fn = { userDrawFunc:() => {}};
       const pane = "pane";
       const co = new CanvasOverlay(fn, pane);
-      expect(co._userDrawFunc).toBe(fn);
+      expect(co._userDrawFunc).toBe(fn.userDrawFunc);
       expect(co._pane).toBe(pane);
     });
   });
 
   describe("drawing", () => {
     it("sets this._userDrawFunc", () => {
-      const co = new CanvasOverlay(() => {}, "");
+      const co = new CanvasOverlay({ userDrawFunc:() => {}}, "");
       const fn = () => {};
       co.drawing(fn);
       expect(co._userDrawFunc).toBe(fn);
@@ -33,7 +33,7 @@ describe("CanvasOverlay", () => {
 
   describe("params", () => {
     it("sets options", () => {
-      const co = new CanvasOverlay(() => {}, "");
+      const co = new CanvasOverlay({ userDrawFunc:() => {}}, "");
       co.params({ pane: "pane" });
       expect(co.options?.pane).toBe("pane");
     });
@@ -42,7 +42,7 @@ describe("CanvasOverlay", () => {
   describe("redraw", () => {
     describe("when callback is truthy", () => {
       it("is added to this._redrawCallbacks", () => {
-        const co = new CanvasOverlay(() => {}, "");
+        const co = new CanvasOverlay({ userDrawFunc:() => {}}, "");
         const fn = () => {};
         co.redraw(fn);
         expect(co._redrawCallbacks).toContain(fn);
@@ -58,19 +58,20 @@ describe("CanvasOverlay", () => {
       });
 
       it("sets this._frame from Util.requestAnimFrame", () => {
-        const co = new CanvasOverlay(() => {}, "");
+        const co = new CanvasOverlay({ userDrawFunc:() => {}}, "");
         const fn = () => {};
-        expect(co._frame).toBe(null);
+        expect(co.tag).not.toBe(null);
+        expect(co.controller().frame).toBe(null); // co._frame
         co.redraw(fn);
-        expect(co._frame).not.toBe(null);
-        expect(requestAnimFrame).toHaveBeenCalledWith(co._redraw, co);
+        expect(co.controller().frame).not.toBe(null);
+        expect(requestAnimFrame).toHaveBeenCalledWith(co.controller()._redraw, co);
       });
     });
   });
 
   describe("onAdd", () => {
     it("sets this.map from map argument", () => {
-      const co = new CanvasOverlay(() => {}, "pane");
+      const co = new CanvasOverlay({ userDrawFunc:() => {}}, "pane");
       const el = document.createElement("div");
       const map = new Map(el);
       map.createPane("pane");
@@ -98,7 +99,7 @@ describe("CanvasOverlay", () => {
     });
     describe("when pane cannot be found", () => {
       it("throws", () => {
-        const co = new CanvasOverlay(() => {}, "pane");
+        const co = new CanvasOverlay({ userDrawFunc:() => {}}, "pane");
         const el = document.createElement("div");
         const map = new Map(el);
         map.setView([1, 1], 1);
@@ -112,8 +113,8 @@ describe("CanvasOverlay", () => {
       const map = co.map;
       jest.spyOn(map, "on");
       co.onAdd(map);
-      expect(map.on).toHaveBeenCalledWith("moveend", co._reset, co);
-      expect(map.on).toHaveBeenCalledWith("resize", co._resize, co);
+      expect(map.on).toHaveBeenCalledWith("moveend", co.controller()._reset, co.controller());
+      expect(map.on).toHaveBeenCalledWith("resize", co.controller()._resize, co.controller());
     });
     describe("when isAnimated", () => {
       it('calls map.on("zoomanim") correctly', () => {
@@ -122,15 +123,15 @@ describe("CanvasOverlay", () => {
         const map = co.map;
         jest.spyOn(map, "on");
         co.onAdd(map);
-        expect(map.on).toHaveBeenCalledWith("zoomanim", co._animateZoom, co);
+        expect(map.on).toHaveBeenCalledWith("zoomanim", co.controller()._animateZoom, co.controller());
       });
     });
     it("calls this._reset", () => {
       const co = getCo();
       const map = co.map;
-      jest.spyOn(co, "_reset");
+      jest.spyOn(co.controller(), "_reset");
       co.onAdd(map);
-      expect(co._reset).toHaveBeenCalled();
+      expect(co.controller()._reset).toHaveBeenCalled();
     });
   });
 
@@ -166,8 +167,8 @@ describe("CanvasOverlay", () => {
       const map = co.map;
       jest.spyOn(map, "off");
       co.onRemove(map);
-      expect(map.off).toHaveBeenCalledWith("moveend", co._reset, co);
-      expect(map.off).toHaveBeenCalledWith("resize", co._resize, co);
+      expect(map.off).toHaveBeenCalledWith("moveend", co.controller()._reset, co.controller());
+      expect(map.off).toHaveBeenCalledWith("resize", co.controller()._resize, co.controller());
     });
 
     describe("when this.isAnimated returns true", () => {
@@ -177,7 +178,7 @@ describe("CanvasOverlay", () => {
         jest.spyOn(co, "isAnimated").mockReturnValue(true);
         jest.spyOn(map, "off");
         co.onRemove(map);
-        expect(map.off).toHaveBeenCalledWith("zoomanim", co._animateZoom, co);
+        expect(map.off).toHaveBeenCalledWith("zoomanim", co.controller()._animateZoom, co.controller());
       });
     });
   });
@@ -194,6 +195,7 @@ describe("CanvasOverlay", () => {
     describe("when this.canvas is defined", () => {
       it("changes the canvas size", () => {
         const co = getCo();
+        expect(co.tag).not.toBe(null);
         const canvas = (co.canvas = document.createElement("canvas"));
         canvas.width = 1;
         canvas.height = 1;
@@ -205,6 +207,7 @@ describe("CanvasOverlay", () => {
           sourceTarget: "",
           propagatedFrom: "",
           layer: co,
+          popup: null,
         };
         co._resize(resizeEvent);
 
@@ -233,9 +236,9 @@ describe("CanvasOverlay", () => {
     });
     it("calls this._redraw", () => {
       const co = getCo();
-      jest.spyOn(co, "_redraw");
+      jest.spyOn(co.controller(), "_redraw");
       co._reset();
-      expect(co._redraw).toHaveBeenCalled();
+      expect(co.controller()._redraw).toHaveBeenCalled();
     });
   });
 
@@ -256,7 +259,7 @@ describe("CanvasOverlay", () => {
         expect(co._userDrawFunc).toHaveBeenCalledWith({
           bounds,
           canvas,
-          offset: co._unclampedProject(
+          offset: unclampedProject( map,
             new LatLng(bounds.getNorth(), bounds.getWest()),
             0
           ),
@@ -264,6 +267,7 @@ describe("CanvasOverlay", () => {
           size,
           zoomScale: 0.00009981280936050754,
           zoom,
+          clear: true
         });
       });
     });
@@ -279,9 +283,10 @@ describe("CanvasOverlay", () => {
     });
     it("sets this._frame to null", () => {
       const co = getCo();
-      co._frame = 10;
+      expect(co.tag).not.toBe(null);
+      co.controller().frame = 10;
       co._redraw();
-      expect(co._frame).toBeNull();
+      expect(co.controller().frame).toBeNull();
     });
   });
 
@@ -298,6 +303,7 @@ describe("CanvasOverlay", () => {
         center: new LatLng(10, 10),
         zoom: 10,
         noUpdate: true,
+        popup: null,
       };
       co._animateZoom(e);
       expect(canvas.style.transform).toBe(
@@ -319,6 +325,7 @@ describe("CanvasOverlay", () => {
         center: new LatLng(10, 10),
         zoom: 10,
         noUpdate: true,
+        popup: null,
       };
       co._animateZoomNoLayer(e);
       expect(canvas.style.transform).toBe(
@@ -336,7 +343,7 @@ describe("CanvasOverlay", () => {
         map.options.crs.transformation,
         "_transform"
       );
-      co._unclampedProject(new LatLng(10, 10), 10);
+      unclampedProject( map, new LatLng(10, 10), 10);
       expect(transform).toHaveBeenCalledWith(
         {
           x: 138353.77777777778,
@@ -351,7 +358,7 @@ describe("CanvasOverlay", () => {
     it("returns the correct unclamped value", () => {
       const co = getCo();
       expect(
-        co._unclampedLatLngBoundsToNewLayerBounds(
+         unclampedLatLngBoundsToNewLayerBounds( co.map,
           new LatLngBounds(new LatLng(1, 1), new LatLng(10, 10)),
           10,
           new LatLng(5, 5)
@@ -367,7 +374,7 @@ describe("CanvasOverlay", () => {
 });
 
 function getCo(mapOptions?: MapOptions): CanvasOverlay {
-  const co = new CanvasOverlay(() => {}, "pane");
+  const co = new CanvasOverlay({ userDrawFunc:() => {}}, "pane");
   const el = document.createElement("div");
   const map = new Map(el, mapOptions);
   map.createPane("pane");

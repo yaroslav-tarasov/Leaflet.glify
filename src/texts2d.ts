@@ -5,69 +5,68 @@ import {
   Position,
 } from "geojson";
 
-import { BaseGlLayer, IBaseGlLayerSettings } from "./base-gl-layer";
+import { LeafletMouseEvent, Map, Point, LatLng, LatLngBounds } from "leaflet";
+import { BaseGl2DLayer, IBaseGl2DLayerSettings } from "./base-gl-2d-layer";
 import { ICanvasOverlayDrawEvent } from "./canvas-overlay";
 import * as Color from "./color";
-import { LeafletMouseEvent, Map, Point, LatLng } from "leaflet";
 import { IPixel } from "./pixel";
-import { locationDistance, pixelInCircle } from "./utils";
+import { locationDistance, normalize_x, normalize_y, pixelInCircle } from "./utils";
 
-export interface IPointsSettings extends IBaseGlLayerSettings {
+export interface IText2DSettings extends IBaseGl2DLayerSettings {
   data: number[][] | FeatureCollection<GeoPoint>;
   size?: ((i: number, latLng: LatLng | null) => number) | number | null;
-  eachVertex?: (pointVertex: IPointVertex) => void;
+  eachVertex?: (pointVertex: ITextVertex) => void;
+  text?: TextCallback | string | null;
+  textBox?: TextBoxCallback | null;
   sensitivity?: number;
   sensitivityHover?: number;
-  textureAtlas?: HTMLImageElement;
 }
 
-const defaults: Partial<IPointsSettings> = {
+export type TextCallback = (featureIndex: number, feature: any) => string;
+export type TextBoxCallback = (featureIndex: number, feature: any) => ITextBox;
+
+const defaults: Partial<IText2DSettings> = {
   color: Color.random,
   opacity: 0.8,
   className: "",
   sensitivity: 2,
   sensitivityHover: 0.03,
-  shaderVariables: {
-    vertex: {
-      type: "FLOAT",
-      start: 0,
-      size: 2,
-    },
-    color: {
-      type: "FLOAT",
-      start: 2,
-      size: 4,
-    },
-    pointSize: {
-      type: "FLOAT",
-      start: 6,
-      size: 1,
-    },
-  },
 };
 
-export interface IPointVertex {
+export interface ITextBox {
+  color : Color.IColor;
+  stroke? : Array<number>;
+}
+
+export interface Dictionary<T> {
+  [Key: string]: T;
+}
+
+export interface ITextVertex {
   latLng: LatLng;
   pixel: IPixel;
   chosenColor: Color.IColor;
   chosenSize: number;
+  chosenColorHexStr: string;
   key: string;
   feature?: any;
+  textBox?: ITextBox;
 }
 
-export class Points extends BaseGlLayer<IPointsSettings> {
+
+export class Text2D extends BaseGl2DLayer<IText2DSettings> {
   static defaults = defaults;
   static maps = [];
-  bytes = 7;
+  bytes = 10;  // in points and here not using
   latLngLookup: {
-    [key: string]: IPointVertex[];
+    [key: string]: ITextVertex[];
   } = {};
 
-  allLatLngLookup: IPointVertex[] = [];
+  allLatLngLookup: ITextVertex[] = [];
   vertices: number[] = [];
   typedVertices: Float32Array = new Float32Array();
   dataFormat: "Array" | "GeoJson.FeatureCollection";
-  settings: Partial<IPointsSettings>;
+  settings: Partial<IText2DSettings>;
   active: boolean;
   glTexture?: WebGLTexture | null;
 
@@ -81,7 +80,7 @@ export class Points extends BaseGlLayer<IPointsSettings> {
     return null;
   }
 
-  constructor(settings: Partial<IPointsSettings>) {
+  constructor(settings: Partial<IText2DSettings>) {
     super(settings);
     this.settings = { ...defaults, ...settings };
 
@@ -106,73 +105,24 @@ export class Points extends BaseGlLayer<IPointsSettings> {
   }
 
 
-  setup(): this {
-    super.setup();
-    const { gl } = this;
-    const { textureAtlas } = this.settings;
-
-    if (textureAtlas) {
-      this.glTexture = gl.createTexture();
-      gl.activeTexture(gl.TEXTURE0); // this is the 0th texture
-      gl.bindTexture(gl.TEXTURE_2D, this.glTexture!);
-
-      // actually upload bytes
-      gl.texImage2D(
-        gl.TEXTURE_2D,
-        0,
-        gl.RGBA,
-        gl.RGBA,
-        gl.UNSIGNED_BYTE,
-        textureAtlas
-      );
-
-      // generates a version for different resolutions, needed to draw
-      // gl.generateMipmap(gl.TEXTURE_2D);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    }
-
-    return this;
-  }
-
   render(): this {
     this.resetVertices();
 
-    const { textureAtlas } = this.settings;
-
     // look up the locations for the inputs to our shaders.
-    const { gl, canvas, layer, vertices, mapMatrix } = this;
-    const matrix = (this.matrix = this.getUniformLocation("matrix"));
-    const verticesBuffer = this.getBuffer("vertices");
-    const verticesTyped = (this.typedVertices = new Float32Array(vertices));
-    const byteCount = verticesTyped.BYTES_PER_ELEMENT;
+    const { canvas, layer, mapMatrix } = this;
     // set the matrix to some that makes 1 unit 1 pixel.
     mapMatrix.setSize(canvas.width, canvas.height);
-    gl.viewport(0, 0, canvas.width, canvas.height);
-    gl.uniformMatrix4fv(matrix, false, mapMatrix.array);
-    gl.bindBuffer(gl.ARRAY_BUFFER, verticesBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, verticesTyped, gl.STATIC_DRAW);
-
-    this.attachShaderVariables(byteCount);
-
-    if (textureAtlas) {
-
-      gl.activeTexture(gl.TEXTURE0); // this is the 0th texture
-      gl.bindTexture(gl.TEXTURE_2D, this.glTexture!);
-
-    }
 
     layer.redraw();
 
     return this;
   }
 
-  getPointLookup(key: string): IPointVertex[] {
+  getPointLookup(key: string): ITextVertex[] {
     return this.latLngLookup[key] || (this.latLngLookup[key] = []);
   }
 
-  addLookup(lookup: IPointVertex): this {
+  addLookup(lookup: ITextVertex): this {
     this.getPointLookup(lookup.key).push(lookup);
     this.allLatLngLookup.push(lookup);
     return this;
@@ -194,22 +144,39 @@ export class Points extends BaseGlLayer<IPointsSettings> {
       color,
       opacity,
       data,
+      
     } = this;
-    const { eachVertex } = settings;
-    let colorFn: ((i: number, latLng: LatLng | any) => Color.IColor) | null =
-      null;
+
+    const { eachVertex, text, textBox } = settings;
+    let colorFn: ((i: number, latLng: LatLng | any) => Color.IColor) | null = null;
     let chosenColor: Color.IColor;
     let chosenSize: number;
+    let chosenColorHexStr: string;
     let sizeFn;
+    let textFn: TextCallback | null = null;
     let rawLatLng: [number, number] | Position;
     let latLng: LatLng;
     let pixel: Point;
     let key;
 
+    let textBoxFn: TextBoxCallback | null = null;
+
     if (!color) {
       throw new Error("color is not properly defined");
     } else if (typeof color === "function") {
       colorFn = color as (i: number, latLng: LatLng) => Color.IColor;
+    }
+
+    if (!text) {
+      // throw new Error("text is not properly defined");  // TODO FIXME 
+    } else if (typeof text === "function") {
+      textFn = text;
+    }
+
+    if (!textBox) {
+      // throw new Error("textBox is not properly defined"); // TODO we need it?
+    } else if (typeof textBox === "function") {
+      textBoxFn = textBox;
     }
 
     if (!size) {
@@ -236,6 +203,8 @@ export class Points extends BaseGlLayer<IPointsSettings> {
         }
 
         chosenColor = { ...chosenColor, a: chosenColor.a ?? opacity ?? 0 };
+        
+        chosenColorHexStr = Color.toHex(chosenColor);
 
         if (sizeFn) {
           chosenSize = sizeFn(i, latLng);
@@ -263,6 +232,7 @@ export class Points extends BaseGlLayer<IPointsSettings> {
           pixel,
           chosenColor,
           chosenSize,
+          chosenColorHexStr,
           feature: rawLatLng,
         };
         this.addLookup(vertex);
@@ -274,12 +244,16 @@ export class Points extends BaseGlLayer<IPointsSettings> {
       const max = data.features.length;
       for (let i = 0; i < max; i++) {
         const feature = data.features[i] as Feature<GeoPoint>;
+        
+
         rawLatLng = feature.geometry.coordinates;
         key =
           rawLatLng[latitudeKey].toFixed(2) +
           "x" +
           rawLatLng[longitudeKey].toFixed(2);
         latLng = new LatLng(rawLatLng[latitudeKey], rawLatLng[longitudeKey]);
+        const zoom = map.getZoom();
+
         pixel = map.project(latLng, 0);
 
         if (colorFn) {
@@ -289,6 +263,7 @@ export class Points extends BaseGlLayer<IPointsSettings> {
         }
 
         chosenColor = { ...chosenColor, a: chosenColor.a ?? opacity ?? 0 };
+        chosenColorHexStr = Color.toHex(chosenColor);
 
         if (sizeFn) {
           chosenSize = sizeFn(i, latLng);
@@ -296,28 +271,34 @@ export class Points extends BaseGlLayer<IPointsSettings> {
           chosenSize = size as number;
         }
 
-        vertices.push(
-          // vertex
-          pixel.x,
-          pixel.y,
+      
+        let str : string;  
+        if (textFn !== null) {
+          str = textFn(i, feature);
+        } else {
+          str = text as string;
+        }
 
-          // color
-          chosenColor.r,
-          chosenColor.g,
-          chosenColor.b,
-          chosenColor.a ?? 0,
+        
+        let textBox;  
+        if (textBoxFn !== null) {
+          textBox = textBoxFn(i, feature);
+        } 
+        // else {
+        //  textBox = textBox as ITextBox;
+        // }
 
-          // size
-          chosenSize
-        );
-        const vertex: IPointVertex = {
+        const vertex: ITextVertex = {
           latLng,
           key,
           pixel,
           chosenColor,
           chosenSize,
+          chosenColorHexStr,
           feature,
+          textBox 
         };
+
         this.addLookup(vertex);
         if (eachVertex) {
           eachVertex(vertex);
@@ -341,44 +322,124 @@ export class Points extends BaseGlLayer<IPointsSettings> {
   drawOnCanvas(e: ICanvasOverlayDrawEvent): this {
     if (!this.gl) return this;
 
-    const { gl, canvas, mapMatrix, matrix, map, allLatLngLookup, layer} = this;
+    const { gl, canvas, mapMatrix, map, allLatLngLookup, vertices } = this;
     const { offset, clear } = e;
     const zoom = map.getZoom();
-    const scale = Math.pow(2, zoom);
+    
+    const ctx = gl;
 
     if(this.tag){
       if( clear ){
-        gl.clear(gl.COLOR_BUFFER_BIT);
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
       }
     } else {
-      gl.clear(gl.COLOR_BUFFER_BIT);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
     }
 
-    if ((this.settings.fadeOnZoom && zoom < this.settings.fadeOnZoom) || !layer.isVisible())
+    if (this.settings.fadeOnZoom && zoom < this.settings.fadeOnZoom || !this.layer.isVisible())
       return this;
 
-    // set base matrix to translate canvas pixel coordinates -> webgl coordinates
-    mapMatrix
-      .setSize(canvas.width, canvas.height)
-      .scaleTo(scale)
-      .translateTo(-offset.x, -offset.y);
+    const scale = Math.pow(2, zoom);
 
-    gl.viewport(0, 0, canvas.width, canvas.height);
-    gl.uniformMatrix4fv(matrix, false, mapMatrix.array);
-    gl.drawArrays(gl.POINTS, 0, allLatLngLookup.length);
+    console.log('zoom:', zoom);
+
+    // set base matrix to translate canvas pixel coordinates -> webgl coordinates
+
+    // mapMatrix
+    //   .setSize(canvas.width, canvas.height)
+    //   .scaleTo(scale)
+    //   .translateTo(-offset.x, -offset.y)
+    //   ;
+    
+    let a0 = 2.0 / canvas.width * scale;
+    let a5 = -2.0 / canvas.height * scale;  
+    let a12 = a0 * (-offset.x) - 1.0; 
+    let a13 = a5 * (-offset.y) + 1.0; 
+
+    // ctx.save();
+
+    const bnds: LatLngBounds = map.getBounds();
+
+  
+    for ( let i:number = 0; i < this.allLatLngLookup.length; ++i )
+    {
+      const vtx = this.allLatLngLookup[i];
+      const icao_name = vtx.feature.properties.icao_name;
+      if (!icao_name && zoom < 10)
+         continue;
+
+      if( !bnds.contains(vtx.latLng))
+        continue;
+
+
+      const dgy = vtx.feature.properties.dbl_idx * 32;  
+      const tx = normalize_x(a0 * vtx.pixel.x + a12)* canvas.width;
+      const ty = normalize_y(a5 * vtx.pixel.y + a13)* canvas.height + 16 + (isNaN(dgy)?0:dgy);
+      
+      ctx.fillStyle = vtx.chosenColorHexStr;
+
+
+      let maxTextX = 0;
+      let maxTextY = 0;
+
+      if(!!icao_name) 
+      { 
+        ctx.font = vtx.chosenSize.toString() + "px serif";
+        let metrics = ctx.measureText(icao_name);
+        ctx.fillText( icao_name, tx - metrics.width / 2 , ty ); 
+        maxTextX = metrics.width;
+        maxTextY +=  vtx.chosenSize; // metrics.actualBoundingBoxDescent + metrics.actualBoundingBoxAscent; 
+      }
+
+      if(!!vtx.feature.properties.display_name ) // && !vtx.textBox
+      { 
+        ctx.font = (vtx.chosenSize - 2).toString() + "px serif";
+        let metrics = ctx.measureText(vtx.feature.properties.display_name);
+        ctx.fillText( vtx.feature.properties.display_name, tx - metrics.width / 2, ty + (!icao_name?0:vtx.chosenSize) ); 
+        maxTextX = Math.max( maxTextX, metrics.width );
+        maxTextY += vtx.chosenSize; // metrics.actualBoundingBoxDescent + metrics.actualBoundingBoxAscent; // 
+      }
+
+      maxTextX = maxTextX * 0.5 + 2;
+      maxTextY = maxTextY * 0.5 + 2;
+      
+      if(vtx.textBox) {
+
+          let dy = ((!!vtx.feature.properties.display_name)? 0 : 4) ; 
+          ctx.beginPath();
+          ctx.moveTo(tx - maxTextX, ty - dy - maxTextY);
+          ctx.lineTo(tx + maxTextX, ty - dy - maxTextY);
+          ctx.lineTo(tx + maxTextX, ty - dy + maxTextY);
+          ctx.lineTo(tx - maxTextX, ty - dy + maxTextY);
+          ctx.lineTo(tx - maxTextX, ty - dy - maxTextY);   
+          
+          if(vtx.textBox.stroke) {
+             ctx.setLineDash(vtx.textBox.stroke);
+          }
+
+          ctx.lineWidth = 2;
+
+          ctx.strokeStyle = Color.toHex(vtx.textBox.color); 
+          ctx.stroke();
+      }
+                    
+    }
+
+    // restore the canvas to its old settings.
+    // ctx.restore();
 
     return this;
   }
 
-  lookup(coords: LatLng): IPointVertex | null {
+  lookup(coords: LatLng): ITextVertex | null {
     const latMax: number = coords.lat + 0.03;
     const lngMax: number = coords.lng + 0.03;
-    const matches: IPointVertex[] = [];
+    const matches: ITextVertex[] = [];
     let lat = coords.lat - 0.03;
     let lng: number;
     let foundI: number;
     let foundMax: number;
-    let found: IPointVertex[];
+    let found: ITextVertex[];
     let key: string;
 
     for (; lat <= latMax; lat += 0.01) {
@@ -399,7 +460,7 @@ export class Points extends BaseGlLayer<IPointsSettings> {
     const { map } = this;
 
     // try matches first, if it is empty, try the data, and hope it isn't too big
-    return Points.closest(
+    return Text2D.closest(
       coords,
       matches.length > 0 ? matches : this.allLatLngLookup,
       map
@@ -408,9 +469,9 @@ export class Points extends BaseGlLayer<IPointsSettings> {
 
   static closest(
     targetLocation: LatLng,
-    points: IPointVertex[],
+    points: ITextVertex[],
     map: Map
-  ): IPointVertex | null {
+  ): ITextVertex | null {
     if (points.length < 1) return null;
     return points.reduce((prev, curr) => {
       const prevDistance = locationDistance(targetLocation, prev.latLng, map);
@@ -423,16 +484,16 @@ export class Points extends BaseGlLayer<IPointsSettings> {
   static tryClick(
     e: LeafletMouseEvent,
     map: Map,
-    instances: Points[],
-    id : number
+    instances: Text2D[],
+    id: number
   ): boolean | undefined {
-    const closestFromEach: IPointVertex[] = [];
-    const instancesLookup: { [key: string]: Points } = {};
+    const closestFromEach: ITextVertex[] = [];
+    const instancesLookup: { [key: string]: Text2D } = {};
     let result;
-    let settings: Partial<IPointsSettings> | null = null;
-    let pointLookup: IPointVertex | null;
+    let settings: Partial<IText2DSettings> | null = null;
+    let pointLookup: ITextVertex | null;
 
-    instances.forEach((_instance: Points) => {
+    instances.forEach((_instance: Text2D) => {
       settings = _instance.settings;
       if (!_instance.active) return;
       if (_instance.map !== map) return;
@@ -459,7 +520,7 @@ export class Points extends BaseGlLayer<IPointsSettings> {
     if (
       pixelInCircle(xy, e.layerPoint, found.chosenSize * (sensitivity ?? 1))
     ) {
-      result = instance.click(e, found.feature || found.latLng, id);
+      result = instance.click(e, found.feature || found.latLng);
       return result !== undefined ? result : true;
     }
   }
@@ -468,10 +529,10 @@ export class Points extends BaseGlLayer<IPointsSettings> {
   static tryHover(
     e: LeafletMouseEvent,
     map: Map,
-    instances: Points[]
+    instances: Text2D[]
   ): Array<boolean | undefined> {
     const results: boolean[] = [];
-    instances.forEach((_instance: Points): void => {
+    instances.forEach((_instance: Text2D): void => {
       if (!_instance.active) return;
       if (_instance.map !== map) return;
       const pointLookup = _instance.lookup(e.latlng);

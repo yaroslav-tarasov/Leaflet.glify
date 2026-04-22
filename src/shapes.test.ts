@@ -9,9 +9,8 @@ import { notProperlyDefined } from "./errors";
 
 jest.mock("./canvas-overlay");
 jest.mock("geojson-flatten", () => {
-  const realGeojsonFlatten = jest.requireActual<typeof geojsonFlatten>(
-    "geojson-flatten"
-  );
+  const realGeojsonFlatten =
+    jest.requireActual<typeof geojsonFlatten>("geojson-flatten");
   return {
     __esModule: true,
     default: jest.fn((v) => realGeojsonFlatten(v)),
