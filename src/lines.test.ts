@@ -3,6 +3,7 @@ import { Feature, FeatureCollection, LineString } from "geojson";
 import { MapMatrix } from "./map-matrix";
 import { ICanvasOverlayDrawEvent } from "./canvas-overlay";
 import { ILinesSettings, Lines, WeightCallback } from "./lines";
+import { FadeOnZoomCallback } from "./base-gl-layer";
 
 jest.mock("./canvas-overlay");
 jest.mock("./utils", () => {
@@ -443,6 +444,17 @@ describe("Lines", () => {
         });
       });
     });
+    it("supports fadeOnZoom callback without type/runtime errors", () => {
+      const fadeOnZoom: FadeOnZoomCallback = () => 10;
+      const lines = new Lines({
+        ...getSettings(),
+        fadeOnZoom,
+      });
+      const { gl } = lines;
+      const viewportSpy = jest.spyOn(gl, "viewport");
+      callDrawOnCanvas(lines, { zoom: 1 });
+      expect(viewportSpy).toHaveBeenCalled();
+    });
   });
   describe("tryClick", () => {
     let lines: Lines;
@@ -482,7 +494,7 @@ describe("Lines", () => {
     describe("when layer has been removed", () => {
       it("is not checked for click", () => {
         lines.remove();
-        Lines.tryClick(mockClick, map, [lines]);
+        Lines.tryClick(mockClick, map, [lines], 1);
         expect(forEachSpy).not.toHaveBeenCalled();
       });
     });
@@ -490,25 +502,25 @@ describe("Lines", () => {
       it("is not checked for click", () => {
         Lines.tryClick(mockClick, new Map(document.createElement("div")), [
           lines,
-        ]);
+        ], 1);
         expect(forEachSpy).not.toHaveBeenCalled();
       });
     });
     describe("when map is same", () => {
       it("is checked for click", () => {
-        Lines.tryClick(mockClick, lines.map, [lines]);
+        Lines.tryClick(mockClick, lines.map, [lines], 1);
         expect(forEachSpy).toHaveBeenCalled();
       });
       describe("when a feature is near point", () => {
         it("calls settings.click", () => {
-          Lines.tryClick(mockClick, lines.map, [lines]);
+          Lines.tryClick(mockClick, lines.map, [lines], 1);
           expect(lines.settings.click).toHaveBeenCalledWith(
             mockClick,
             lines.data.features[0]
           );
         });
         it("returns the response from settings.click", () => {
-          const result = Lines.tryClick(mockClick, lines.map, [lines]);
+          const result = Lines.tryClick(mockClick, lines.map, [lines], 1);
           expect(result).toBe(true);
         });
       });
@@ -521,7 +533,7 @@ describe("Lines", () => {
         // 2 < 0.01 + 2 / 1 (2.01)
         it("does not call settings.click", () => {
           lines.settings.sensitivity = -0.01;
-          Lines.tryClick(mockClick, lines.map, [lines]);
+          Lines.tryClick(mockClick, lines.map, [lines], 1);
           expect(lines.settings.click).not.toHaveBeenCalled();
         });
       });
