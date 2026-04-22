@@ -52,6 +52,7 @@ export class Glify {
   longitudeKey = 1;
   latitudeKey = 0;
   clickSetupMaps: Map[] = [];
+  contextMenuSetupMaps: Map[] = [];
   hoverSetupMaps: Map[] = [];
   shader = shader;
 

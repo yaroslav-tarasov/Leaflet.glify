@@ -16,6 +16,8 @@ import { ICanvasOverlayDrawEvent } from "./canvas-overlay";
 import * as color from "./color";
 import { LineFeatureVertices } from "./line-feature-vertices";
 import { latLngDistance, inBounds } from "./utils";
+//import glify from "./index";
+import { getChosenColor } from "./color";
 
 export type WeightCallback = (i: number, feature: any) => number;
 
@@ -160,6 +162,7 @@ export class Lines extends BaseGlLayer<ILinesSettings> {
       } else {
         chosenColor = color as color.IColor;
       }
+      chosenColor = getChosenColor(chosenColor);
 
       const chosenWeight: number = weightFn
         ? weightFn(featureIndex, feature)
