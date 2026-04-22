@@ -82,16 +82,46 @@ export class Glify {
     ];
   }
 
+  /**
+   * Set coordinate order to [longitude, latitude] 
+   * WGS84/GeoJSON standard
+   * NOTE: This is the default and recommended format
+   */
   longitudeFirst(): this {
     this.longitudeKey = 0;
     this.latitudeKey = 1;
     return this;
   }
 
+
+
+
+  /**
+   * Set coordinate order to [latitude, longitude] 
+   * Legacy format: Use only for data that doesn't 
+   * follow WGS84/GeoJSON standards
+   */
   latitudeFirst(): this {
     this.latitudeKey = 0;
     this.longitudeKey = 1;
     return this;
+  }
+
+  getCoordinateOrder(): "latFirst" | "lngFirst" {
+    return this.longitudeKey === 0 ? "lngFirst" : "latFirst";
+  }
+
+  /**
+   * Set coordinate order for data parsing
+   * @param order - "lngFirst" for WGS84/GeoJSON standard [longitude, latitude]
+   *                "latFirst" for legacy format [latitude, longitude]
+   */
+  setCoordinateOrder(order: "latFirst" | "lngFirst"): this {
+    if (order === "lngFirst") {
+      return this.longitudeFirst();
+    } else {
+      return this.latitudeFirst();
+    }
   }
 
   get instances(): Array<Points | Lines | Shapes | Quads> {
@@ -106,6 +136,7 @@ export class Glify {
   points(settings: Partial<IPointsSettings>): Points {
     const points = new this.Points({
       setupClick: this.setupClick.bind(this),
+      setupContextMenu: this.setupContextMenu.bind(this),
       setupHover: this.setupHover.bind(this),
       latitudeKey: this.latitudeKey,
       longitudeKey: this.longitudeKey,
@@ -126,6 +157,7 @@ export class Glify {
   lines(settings: Partial<ILinesSettings>): Lines {
     const lines = new this.Lines({
       setupClick: this.setupClick.bind(this),
+      setupContextMenu: this.setupContextMenu.bind(this),
       setupHover: this.setupHover.bind(this),
       latitudeKey: this.latitudeKey,
       longitudeKey: this.longitudeKey,
@@ -144,6 +176,7 @@ export class Glify {
   shapes(settings: Partial<IShapesSettings>): Shapes {
     const shapes = new this.Shapes({
       setupClick: this.setupClick.bind(this),
+      setupContextMenu: this.setupContextMenu.bind(this),
       setupHover: this.setupHover.bind(this),
       latitudeKey: this.latitudeKey,
       longitudeKey: this.longitudeKey,
@@ -227,6 +260,24 @@ export class Glify {
       if (hit !== undefined) res = res || hit;
 
       return res;
+    });
+  }
+
+  // FIXME  by pattern setupClick
+  setupContextMenu(map: Map): void {
+    if (this.contextMenuSetupMaps.includes(map)) return;
+    this.clickSetupMaps.push(map);
+    map.on("contextmenu", (e: LeafletMouseEvent) => {
+      e.originalEvent.preventDefault(); // Prevent the default context menu from showing
+      let hit;
+      hit = this.Points.tryContextMenu(e, map, this.pointsInstances);
+      if (hit !== undefined) return hit;
+
+      hit = this.Lines.tryContextMenu(e, map, this.linesInstances);
+      if (hit !== undefined) return hit;
+
+      hit = this.Shapes.tryContextMenu(e, map, this.shapesInstances);
+      if (hit !== undefined) return hit;
     });
   }
 

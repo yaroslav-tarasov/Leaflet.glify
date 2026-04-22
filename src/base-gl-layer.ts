@@ -35,6 +35,7 @@ export interface IBaseGlLayerSettings {
     [name: string]: IShaderVariable;
   };
   setupClick?: (map: Map) => void;
+  setupContextMenu?: (map: Map) => void;
   setupHover?: SetupHoverCallback;
   sensitivity?: number;
   sensitivityHover?: number;
@@ -42,9 +43,10 @@ export interface IBaseGlLayerSettings {
   fragmentShaderSource?: (() => string) | string;
   canvas?: HTMLCanvasElement;
   click?: EventCallback;
+  contextMenu?: EventCallback;
   hover?: EventCallback;
   hoverOff?: EventCallback;
-  color?: ColorCallback | IColor | null;
+  color?: ColorCallback | IColor | string | number[] | null;
   className?: string;
   opacity?: number;
   preserveDrawingBuffer?: boolean;
@@ -151,7 +153,7 @@ export abstract class BaseGlLayer<
     return this.settings.opacity;
   }
 
-  get color(): ColorCallback | IColor | null {
+  get color(): ColorCallback | IColor | string | number[] | null {
     return this.settings.color ?? null;
   }
 
@@ -275,6 +277,9 @@ export abstract class BaseGlLayer<
     const settings = this.settings;
     if (settings.click && settings.setupClick) {
       settings.setupClick(this.map);
+    }
+    if (settings.contextMenu && settings.setupContextMenu) {
+      settings.setupContextMenu(this.map);
     }
     if (settings.hover && settings.setupHover) {
       settings.setupHover(this.map, this.hoverWait);
@@ -551,6 +556,14 @@ export abstract class BaseGlLayer<
   click(e: LeafletMouseEvent, feature: any, id?: number): boolean | undefined {
     if (!this.settings.click) return;
     const result = this.settings.click(e, feature, id);
+    if (result !== undefined) {
+      return result;
+    }
+  }
+
+  contextMenu(e: LeafletMouseEvent, feature: any): boolean | undefined {
+    if (!this.settings.contextMenu) return;
+    const result = this.settings.contextMenu(e, feature);
     if (result !== undefined) {
       return result;
     }
