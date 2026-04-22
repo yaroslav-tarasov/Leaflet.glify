@@ -207,6 +207,20 @@ export abstract class BaseGl2DLayer<
     return this.render();
   }
 
+  destroy(): this {
+    if (this.active && this.map && this.map.hasLayer(this.layer)) {
+      this.map.removeLayer(this.layer);
+    }
+    this.active = false;
+
+    const tag = this.tag;
+    if (tag && !CanvasOverlay.linkedLayers[tag]) {
+      delete BaseGl2DLayer.commonCanvas[tag];
+    }
+
+    return this;
+  }
+
   remove(indices?: number | number[]): this {
     if (indices === undefined) {
       this.map.removeLayer(this.layer);

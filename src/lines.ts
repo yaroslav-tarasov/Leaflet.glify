@@ -1,4 +1,4 @@
-import { Map, LeafletMouseEvent, geoJSON } from "leaflet";
+import { Map, LeafletMouseEvent, geoJSON, LatLngBounds } from "leaflet";
 import {
   Feature,
   FeatureCollection,
@@ -61,6 +61,7 @@ export class Lines extends BaseGlLayer<ILinesSettings> {
   allVerticesTyped: Float32Array = new Float32Array(0);
   vertices: LineFeatureVertices[] = [];
   aPointSize = -1;
+  hoverBounds: LatLngBounds | null = null;
   settings: Partial<ILinesSettings>;
 
   get weight(): WeightCallback | number {
@@ -224,6 +225,7 @@ export class Lines extends BaseGlLayer<ILinesSettings> {
     this.vertices = vertices;
     this.allVertices = allVertices;
     this.allVerticesTyped = new Float32Array(allVertices);
+    this.hoverBounds = geoJSON(features).getBounds();
 
     return this;
   }
@@ -256,8 +258,11 @@ export class Lines extends BaseGlLayer<ILinesSettings> {
       gl.clear(gl.COLOR_BUFFER_BIT);
     }
 
-    if ( this.settings.fadeOnZoom &&
-         zoom < this.settings.fadeOnZoom || (!layer.isVisible()) )
+    const { fadeOnZoom } = this.settings;
+    if (
+      (typeof fadeOnZoom === "number" && zoom < fadeOnZoom) ||
+      !layer.isVisible()
+    )
       return this;
 
     gl.viewport(0, 0, canvas.width, canvas.height);
@@ -499,10 +504,8 @@ export class Lines extends BaseGlLayer<ILinesSettings> {
       const newHoveredFeatures: Array<Feature<LineString | MultiLineString>> =
         [];
       instance.hoveringFeatures = newHoveredFeatures;
-      // Check if e.latlng is inside the bbox of the features
-      const bounds = geoJSON(data.features).getBounds();
-
-      if (inBounds(e.latlng, bounds)) {
+      const bounds = instance.hoverBounds;
+      if (bounds && bounds.isValid() && inBounds(e.latlng, bounds)) {
         data.features.forEach(
           (feature: Feature<LineString | MultiLineString>, i: number): void => {
             const chosenWeight =

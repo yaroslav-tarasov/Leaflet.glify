@@ -69,6 +69,19 @@ export class Glify {
   textsInstances: Texts[] = [];
   text2dInstances: Text2D[] = [];
 
+  private get allLayerInstances(): Array<
+    Points | Lines | Shapes | Quads | Texts | Text2D
+  > {
+    return [
+      ...this.pointsInstances,
+      ...this.linesInstances,
+      ...this.shapesInstances,
+      ...this.quadsInstances,
+      ...this.textsInstances,
+      ...this.text2dInstances,
+    ];
+  }
+
   longitudeFirst(): this {
     this.longitudeKey = 0;
     this.latitudeKey = 1;
@@ -94,8 +107,8 @@ export class Glify {
     const points = new this.Points({
       setupClick: this.setupClick.bind(this),
       setupHover: this.setupHover.bind(this),
-      latitudeKey: glify.latitudeKey,
-      longitudeKey: glify.longitudeKey,
+      latitudeKey: this.latitudeKey,
+      longitudeKey: this.longitudeKey,
       vertexShaderSource: () => {
         return this.shader.vertex;
       },
@@ -150,8 +163,8 @@ export class Glify {
     const quads = new this.Quads({
       setupClick: this.setupClick.bind(this),
       setupHover: this.setupHover.bind(this),
-      latitudeKey: glify.latitudeKey,
-      longitudeKey: glify.longitudeKey,
+      latitudeKey: this.latitudeKey,
+      longitudeKey: this.longitudeKey,
       vertexShaderSource: () => {
         return this.shader.vertex_quad;
       },
@@ -168,8 +181,8 @@ export class Glify {
     const texts = new this.Texts({
       setupClick: this.setupClick.bind(this),
       setupHover: this.setupHover.bind(this),
-      latitudeKey: glify.latitudeKey,
-      longitudeKey: glify.longitudeKey,
+      latitudeKey: this.latitudeKey,
+      longitudeKey: this.longitudeKey,
       vertexShaderSource: () => {
         return this.shader.vertex_text;
       },
@@ -186,8 +199,8 @@ export class Glify {
     const texts = new this.Text2D({
       setupClick: this.setupClick.bind(this),
       setupHover: this.setupHover.bind(this),
-      latitudeKey: glify.latitudeKey,
-      longitudeKey: glify.longitudeKey,
+      latitudeKey: this.latitudeKey,
+      longitudeKey: this.longitudeKey,
       ...settings,
     });
     this.text2dInstances.push(texts);
@@ -227,11 +240,55 @@ export class Glify {
           this.Points.tryHover(e, map, this.pointsInstances);
           this.Lines.tryHover(e, map, this.linesInstances);
           this.Shapes.tryHover(e, map, this.shapesInstances);
+          this.Quads.tryHover(e, map, this.quadsInstances);
+          this.Texts.tryHover(e, map, this.textsInstances);
+          this.Text2D.tryHover(e, map, this.text2dInstances);
         },
         hoverWait ?? 0,
         immediate
       )
     );
+  }
+
+  destroyByMap(map: Map): this {
+    const destroyAndFilter = <T extends { map: Map; destroy?: () => unknown }>(
+      instances: T[]
+    ): T[] => {
+      instances.forEach((instance) => {
+        if (instance.map === map && typeof instance.destroy === "function") {
+          instance.destroy();
+        }
+      });
+      return instances.filter((instance) => instance.map !== map);
+    };
+
+    this.pointsInstances = destroyAndFilter(this.pointsInstances);
+    this.linesInstances = destroyAndFilter(this.linesInstances);
+    this.shapesInstances = destroyAndFilter(this.shapesInstances);
+    this.quadsInstances = destroyAndFilter(this.quadsInstances);
+    this.textsInstances = destroyAndFilter(this.textsInstances);
+    this.text2dInstances = destroyAndFilter(this.text2dInstances);
+
+    this.clickSetupMaps = this.clickSetupMaps.filter((m) => m !== map);
+    this.hoverSetupMaps = this.hoverSetupMaps.filter((m) => m !== map);
+    return this;
+  }
+
+  destroyAll(): this {
+    this.allLayerInstances.forEach((instance) => {
+      if (typeof instance.destroy === "function") {
+        instance.destroy();
+      }
+    });
+    this.pointsInstances = [];
+    this.linesInstances = [];
+    this.shapesInstances = [];
+    this.quadsInstances = [];
+    this.textsInstances = [];
+    this.text2dInstances = [];
+    this.clickSetupMaps = [];
+    this.hoverSetupMaps = [];
+    return this;
   }
 }
 
