@@ -175,7 +175,7 @@ export class CanvasOverlay extends Layer {
   _pane: string;
 
   //_frame?: number | null;
-  options?: LayerOptions;
+  options: LayerOptions;
   visible: boolean;
   tag? : string;
 
@@ -204,6 +204,8 @@ export class CanvasOverlay extends Layer {
     this._pane = pane;
     this.visible = true;
     this.tag = eventsCallback.tag?? Math.random().toString(36).substring(2,7);
+
+    this.options = {}; // FIX что это и нахрена его надо инициализировать?
 
     if(this.tag){
       if ( CanvasOverlay.linkedLayers[this.tag] === undefined)
